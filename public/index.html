@@ -4,6 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Filter Control</title>
+    
+    <!-- Retro Terminal Favicon -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2300ff9f'><rect x='2' y='3' width='20' height='14' rx='2' stroke='%2300ff9f' stroke-width='2' fill='%230d1b2a'/><path d='M6 7h2v2H6zM6 10h8v1H6z' fill='%2300ff9f'/><circle cx='18' cy='8' r='1' fill='%2300ff9f'/></svg>" type="image/svg+xml">
+    
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap');
 
@@ -197,9 +201,9 @@
 
         .contact-item {
             display: grid;
-            grid-template-columns: 180px 1fr 100px 60px;
+            grid-template-columns: 1fr 1fr 100px 60px;
             align-items: center;
-            gap: 20px;
+            gap: 15px;
             padding: 15px;
             background: rgba(0,255,159,0.03);
             border: 1px solid rgba(0,255,159,0.3);
@@ -302,19 +306,80 @@
         }
 
         @media (max-width: 768px) {
+            .terminal {
+                margin: 10px;
+            }
+            
+            .content {
+                padding: 20px;
+            }
+            
+            .status-bar {
+                flex-direction: column;
+                gap: 10px;
+            }
+            
+            .status-item {
+                text-align: center;
+            }
+            
+            .stats {
+                grid-template-columns: 1fr;
+                gap: 15px;
+            }
+            
             .add-form {
                 grid-template-columns: 1fr;
-                gap: 20px;
+                gap: 15px;
             }
             
             .contact-item {
                 grid-template-columns: 1fr;
                 gap: 10px;
                 text-align: left;
+                padding: 20px;
             }
             
-            .stats {
-                grid-template-columns: 1fr;
+            .contact-item > div {
+                padding: 5px 0;
+                border-bottom: 1px solid rgba(0,255,159,0.2);
+            }
+            
+            .contact-item > div:last-child {
+                border-bottom: none;
+                text-align: center;
+                padding-top: 15px;
+            }
+            
+            .remove-btn {
+                width: 100%;
+                height: 45px;
+                margin-top: 10px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .header {
+                font-size: 14px;
+                padding: 12px 20px;
+            }
+            
+            .content {
+                padding: 15px;
+            }
+            
+            .stat-number {
+                font-size: 28px;
+            }
+            
+            .input-field {
+                padding: 15px 12px;
+                font-size: 16px;
+            }
+            
+            .btn {
+                padding: 15px;
+                font-size: 14px;
             }
         }
     </style>
@@ -328,23 +393,23 @@
         <div class="content">
             <div class="status-bar">
                 <div class="status-item">
-                    STATUS: <span class="blink">ONLINE</span>
+                    STATUS: <span class="blink" id="systemStatus">LOADING</span>
                 </div>
                 <div class="status-item">
-                    UPTIME: 02:34:12
+                    UPTIME: <span id="uptime">--:--:--</span>
                 </div>
                 <div class="status-item">
-                    WEBHOOK: <span id="webhookStatus">CONFIGURED</span>
+                    WEBHOOK: <span id="webhookStatus">CHECKING</span>
                 </div>
             </div>
 
             <div class="stats">
                 <div class="stat-box">
-                    <div class="stat-number" id="totalContacts">0</div>
+                    <div class="stat-number" id="totalContacts">-</div>
                     <div class="stat-label">ACTIVE CONTACTS</div>
                 </div>
                 <div class="stat-box">
-                    <div class="stat-number" id="todayMessages">0</div>
+                    <div class="stat-number" id="todayMessages">-</div>
                     <div class="stat-label">MESSAGES TODAY</div>
                 </div>
             </div>
@@ -376,8 +441,8 @@
                             <select class="input-field" id="typeInput">
                                 <option value="PERSONAL">PERSONAL</option>
                                 <option value="BUSINESS">BUSINESS</option>
-                                <option value="SUPPLIER">SUPPLIER</option>
                                 <option value="VIP">VIP</option>
+                                <option value="TEMP">TEMP</option>
                             </select>
                         </div>
                         <button class="btn" onclick="addContact()">ADD</button>
@@ -389,7 +454,10 @@
                 <div class="section-header">AUTHORIZED CONTACTS</div>
                 <div class="section-content">
                     <div id="contactsList" class="contact-list">
-                        <!-- האנשי קשר יופיעו כאן -->
+                        <div class="empty-state">
+                            <div class="empty-icon">⊗</div>
+                            <div>NO CONTACTS FOUND</div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -399,26 +467,97 @@
     <div class="toast" id="toast"></div>
 
     <script>
-        // נתונים דמה - בפועל יגיעו מהשרת
-        let contacts = [
-            { phone: '972-50-123-4567', name: 'MOM', type: 'PERSONAL' },
-            { phone: '972-54-987-6543', name: 'VIP CLIENT', type: 'VIP' },
-            { phone: '972-52-555-1234', name: 'PARTS SUPPLIER', type: 'SUPPLIER' }
-        ];
+        // START COMPLETELY EMPTY - NO DEMO DATA
+        let contacts = [];
+        let stats = { totalMessages: 0, filteredMessages: 0, allowedMessages: 0 };
 
-        function getContactType(name) {
-            const businessKeywords = ['לקוח', 'חברה', 'ספק', 'עסק', 'משרד'];
-            const personalKeywords = ['אמא', 'אבא', 'אח', 'אחות', 'חבר', 'משפחה'];
-            
-            const lowerName = name.toLowerCase();
-            
-            if (personalKeywords.some(word => lowerName.includes(word))) {
-                return 'אישי';
-            } else if (businessKeywords.some(word => lowerName.includes(word))) {
-                return 'עסקי';
-            } else {
-                return 'כללי';
+        // Load data from server
+        async function loadConfig() {
+            try {
+                const response = await fetch('/api/config');
+                if (response.ok) {
+                    const data = await response.json();
+                    contacts = data.contacts || [];
+                    stats = data.stats || stats;
+                    
+                    renderContacts();
+                    updateStats();
+                    
+                    document.getElementById('systemStatus').textContent = 'ONLINE';
+                    
+                    if (data.webhookFromEnv) {
+                        document.getElementById('webhookStatus').textContent = 'ENV';
+                    } else {
+                        document.getElementById('webhookStatus').textContent = 'SET';
+                    }
+                } else {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+            } catch (error) {
+                console.error('Failed to load config:', error);
+                showToast('CONNECTION ERROR', 'error');
+                document.getElementById('systemStatus').textContent = 'OFFLINE';
+                document.getElementById('webhookStatus').textContent = 'ERROR';
             }
+        }
+
+        // Load system info
+        async function loadSystemInfo() {
+            try {
+                const response = await fetch('/health');
+                if (response.ok) {
+                    const data = await response.json();
+                    
+                    const hours = Math.floor(data.uptime / 3600);
+                    const minutes = Math.floor((data.uptime % 3600) / 60);
+                    const seconds = Math.floor(data.uptime % 60);
+                    document.getElementById('uptime').textContent = 
+                        `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                }
+            } catch (error) {
+                document.getElementById('uptime').textContent = '--:--:--';
+            }
+        }
+
+        // Save contacts to server
+        async function saveContacts() {
+            try {
+                const response = await fetch('/api/contacts', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ contacts })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Save failed');
+                }
+            } catch (error) {
+                console.error('Failed to save contacts:', error);
+                showToast('SAVE FAILED', 'error');
+                throw error;
+            }
+        }
+
+        function updateStats() {
+            document.getElementById('totalContacts').textContent = contacts.length;
+            document.getElementById('todayMessages').textContent = stats.allowedMessages || 0;
+        }
+
+        function validatePhone(phone) {
+            const phoneRegex = /^972[-\s]?[1-9]\d{1}[-\s]?\d{3}[-\s]?\d{4}$/;
+            const cleaned = phone.replace(/[-\s]/g, '');
+            return phoneRegex.test(phone) && cleaned.length >= 12 && cleaned.length <= 13;
+        }
+
+        function validateName(name) {
+            if (name.length < 2 || name.length > 50) return false;
+            const nameRegex = /^[a-zA-Z\u0590-\u05FF\s]+$/;
+            return nameRegex.test(name);
+        }
+
+        function sanitizeInput(input) {
+            return input.replace(/[<>\"'&]/g, '');
         }
 
         function renderContacts() {
@@ -431,7 +570,7 @@
                         <div>NO CONTACTS FOUND</div>
                     </div>
                 `;
-                document.getElementById('totalContacts').textContent = '0';
+                updateStats();
                 return;
             }
 
@@ -444,124 +583,10 @@
                 </div>
             `).join('');
 
-            document.getElementById('totalContacts').textContent = contacts.length;
+            updateStats();
         }
 
-        function validatePhone(phone) {
-            // בדיקת פורמט מספר ישראלי
-            const phoneRegex = /^972[-\s]?[1-9]\d{1}[-\s]?\d{3}[-\s]?\d{4}$/;
-            const cleaned = phone.replace(/[-\s]/g, '');
-            return phoneRegex.test(phone) && cleaned.length >= 12 && cleaned.length <= 13;
-        }
-
-        function validateName(name) {
-            // בדיקת אורך ותווים מותרים
-            if (name.length < 2 || name.length > 50) return false;
-            const nameRegex = /^[a-zA-Z\u0590-\u05FF\s]+$/; // אנגלית + עברית + רווחים
-            return nameRegex.test(name);
-        }
-
-        function sanitizeInput(input) {
-            // מניעת XSS
-            return input.replace(/[<>\"'&]/g, '');
-        }
-
-        function saveToStorage() {
-            try {
-                localStorage.setItem('filterContacts', JSON.stringify(contacts));
-                localStorage.setItem('filterWebhook', document.getElementById('webhookInput').value);
-            } catch (e) {
-                console.error('Failed to save to localStorage');
-            }
-        }
-
-        function loadFromStorage() {
-            try {
-                const savedContacts = localStorage.getItem('filterContacts');
-                const savedWebhook = localStorage.getItem('filterWebhook');
-                
-                if (savedContacts) {
-                    contacts = JSON.parse(savedContacts);
-                }
-                
-                if (savedWebhook) {
-                    document.getElementById('webhookInput').value = savedWebhook;
-                }
-            } catch (e) {
-                console.error('Failed to load from localStorage');
-            }
-        }
-
-        async function testWebhook() {
-            const webhookUrl = document.getElementById('webhookInput').value;
-            if (!webhookUrl) {
-                showToast('NO WEBHOOK URL', 'error');
-                return;
-            }
-
-            try {
-                const testMessage = {
-                    test: true,
-                    timestamp: Date.now(),
-                    message: 'FILTER_SYSTEM_TEST'
-                };
-                
-                // Mock test - בפועל נשלח לשרת שיבדוק
-                await new Promise(resolve => setTimeout(resolve, 1000));
-                
-                showToast('WEBHOOK TEST OK');
-                document.getElementById('webhookStatus').textContent = 'TESTED';
-            } catch (error) {
-                showToast('WEBHOOK TEST FAILED', 'error');
-                document.getElementById('webhookStatus').textContent = 'ERROR';
-            }
-        }
-
-        function updateWebhook() {
-            const webhookInput = document.getElementById('webhookInput');
-            const url = webhookInput.value.trim();
-
-            if (!url) {
-                showToast('MISSING URL', 'error');
-                return;
-            }
-
-            if (!url.startsWith('http')) {
-                showToast('INVALID URL', 'error');
-                return;
-            }
-
-            // בפועל - שליחה לשרת לעדכון הגדרות
-            showToast('WEBHOOK UPDATED');
-        }
-
-        function updateWebhook() {
-            const webhookInput = document.getElementById('webhookInput');
-            const url = webhookInput.value.trim();
-
-            if (!url) {
-                showToast('MISSING URL', 'error');
-                return;
-            }
-
-            if (!url.startsWith('https://')) {
-                showToast('MUST USE HTTPS', 'error');
-                return;
-            }
-
-            try {
-                new URL(url); // בדיקת תקינות URL
-            } catch {
-                showToast('INVALID URL FORMAT', 'error');
-                return;
-            }
-
-            saveToStorage();
-            showToast('WEBHOOK UPDATED');
-            document.getElementById('webhookStatus').textContent = 'UPDATED';
-        }
-
-        function addContact() {
+        async function addContact() {
             const phoneInput = document.getElementById('phoneInput');
             const nameInput = document.getElementById('nameInput');
             const typeInput = document.getElementById('typeInput');
@@ -570,7 +595,6 @@
             let name = nameInput.value.trim();
             const type = typeInput.value;
 
-            // Validation
             if (!phone || !name) {
                 showToast('MISSING DATA', 'error');
                 return;
@@ -588,7 +612,6 @@
                 return;
             }
 
-            // Sanitize
             phone = sanitizeInput(phone);
             name = sanitizeInput(name);
 
@@ -600,23 +623,34 @@
             const newContact = { phone, name, type };
             contacts.push(newContact);
             
-            // Clear inputs
-            phoneInput.value = '';
-            nameInput.value = '';
-            typeInput.value = 'PERSONAL';
-            
-            saveToStorage();
-            renderContacts();
-            showToast('CONTACT ADDED');
+            try {
+                await saveContacts();
+                
+                phoneInput.value = '';
+                nameInput.value = '';
+                typeInput.value = 'PERSONAL';
+                
+                renderContacts();
+                showToast('CONTACT ADDED');
+            } catch (error) {
+                contacts.pop();
+            }
         }
 
-        function removeContact(index) {
+        async function removeContact(index) {
             if (index < 0 || index >= contacts.length) return;
             
+            const removedContact = contacts[index];
             contacts.splice(index, 1);
-            saveToStorage();
-            renderContacts();
-            showToast('CONTACT REMOVED');
+            
+            try {
+                await saveContacts();
+                renderContacts();
+                showToast('CONTACT REMOVED');
+            } catch (error) {
+                contacts.splice(index, 0, removedContact);
+                renderContacts();
+            }
         }
 
         function showToast(message, type = 'success') {
@@ -630,7 +664,7 @@
             }, 2000);
         }
 
-        // Enter key בשדות הקלט
+        // Enter key navigation
         document.getElementById('phoneInput').addEventListener('keypress', function(e) {
             if (e.key === 'Enter') {
                 document.getElementById('nameInput').focus();
@@ -649,19 +683,15 @@
             }
         });
 
-        // סימולציה של עדכון מונה הודעות
-        let messageCount = 15;
+        // Auto-refresh data every 30 seconds
         setInterval(() => {
-            if (Math.random() > 0.7) {
-                messageCount += Math.floor(Math.random() * 3) + 1;
-                document.getElementById('todayMessages').textContent = messageCount;
-            }
-        }, 5000);
+            loadConfig();
+            loadSystemInfo();
+        }, 30000);
 
-        // טעינה ראשונית
-        document.getElementById('todayMessages').textContent = messageCount;
-        loadFromStorage(); // טעינת נתונים שמורים
-        renderContacts();
+        // Initial load
+        loadConfig();
+        loadSystemInfo();
     </script>
 </body>
 </html>
