@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Filter Control</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap');
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Orbitron', monospace;
+            background: #0d1b2a;
+            color: #00ff9f;
+            min-height: 100vh;
+            padding: 20px;
+            background-image: 
+                linear-gradient(90deg, rgba(0,255,159,0.1) 1px, transparent 1px),
+                linear-gradient(180deg, rgba(0,255,159,0.1) 1px, transparent 1px);
+            background-size: 20px 20px;
+            text-align: left;
+        }
+
+        .terminal {
+            max-width: 800px;
+            margin: 0 auto;
+            background: #1a2332;
+            border: 2px solid #00ff9f;
+            border-radius: 8px;
+            box-shadow: 
+                0 0 20px rgba(0,255,159,0.3),
+                inset 0 0 20px rgba(0,255,159,0.1);
+        }
+
+        .header {
+            background: #00ff9f;
+            color: #0d1b2a;
+            padding: 15px 25px;
+            font-weight: 900;
+            font-size: 18px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            border-bottom: 2px solid #00ff9f;
+            text-align: left;
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .status-bar {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 30px;
+            font-family: monospace;
+            font-size: 14px;
+        }
+
+        .status-item {
+            background: rgba(0,255,159,0.1);
+            padding: 8px 15px;
+            border: 1px solid #00ff9f;
+            border-radius: 4px;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 40px;
+        }
+
+        .stat-box {
+            background: rgba(0,255,159,0.05);
+            border: 1px solid #00ff9f;
+            padding: 20px;
+            text-align: center;
+            border-radius: 4px;
+        }
+
+        .stat-number {
+            font-size: 36px;
+            font-weight: 900;
+            color: #00ff9f;
+            text-shadow: 0 0 10px rgba(0,255,159,0.5);
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            opacity: 0.8;
+        }
+
+        .section {
+            margin-bottom: 40px;
+            border: 1px solid #00ff9f;
+            border-radius: 4px;
+            background: rgba(0,255,159,0.02);
+        }
+
+        .section-header {
+            background: rgba(0,255,159,0.1);
+            padding: 12px 20px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-size: 14px;
+            border-bottom: 1px solid #00ff9f;
+            text-align: left;
+        }
+
+        .section-content {
+            padding: 25px;
+        }
+
+        .add-form {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr 120px;
+            gap: 15px;
+            align-items: end;
+        }
+
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            text-align: left;
+        }
+
+        .input-label {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            opacity: 0.8;
+            text-align: left;
+        }
+
+        .input-field {
+            background: transparent;
+            border: 1px solid #00ff9f;
+            color: #00ff9f;
+            padding: 12px;
+            font-family: 'Orbitron', monospace;
+            font-size: 14px;
+            border-radius: 4px;
+            outline: none;
+            transition: all 0.3s ease;
+            text-align: left;
+        }
+
+        .input-field:focus {
+            border-color: #00ff9f;
+            box-shadow: 0 0 10px rgba(0,255,159,0.3);
+            background: rgba(0,255,159,0.05);
+        }
+
+        .input-field::placeholder {
+            color: rgba(0,255,159,0.5);
+        }
+
+        .btn {
+            background: transparent;
+            border: 2px solid #00ff9f;
+            color: #00ff9f;
+            padding: 12px 20px;
+            font-family: 'Orbitron', monospace;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: all 0.3s ease;
+        }
+
+        .btn:hover {
+            background: #00ff9f;
+            color: #0d1b2a;
+            box-shadow: 0 0 15px rgba(0,255,159,0.5);
+        }
+
+        .btn:active {
+            transform: scale(0.98);
+        }
+
+        .contact-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .contact-item {
+            display: grid;
+            grid-template-columns: 180px 1fr 100px 60px;
+            align-items: center;
+            gap: 20px;
+            padding: 15px;
+            background: rgba(0,255,159,0.03);
+            border: 1px solid rgba(0,255,159,0.3);
+            border-radius: 4px;
+            transition: all 0.3s ease;
+        }
+
+        .contact-item:hover {
+            background: rgba(0,255,159,0.08);
+            border-color: #00ff9f;
+        }
+
+        .contact-number {
+            font-family: monospace;
+            font-size: 14px;
+            font-weight: 700;
+            text-align: left;
+        }
+
+        .contact-name {
+            font-size: 14px;
+            font-weight: 400;
+            text-align: left;
+        }
+
+        .contact-type {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            opacity: 0.7;
+            text-align: left;
+        }
+
+        .remove-btn {
+            background: transparent;
+            border: 1px solid #ff4757;
+            color: #ff4757;
+            width: 40px;
+            height: 40px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-family: monospace;
+            font-size: 16px;
+            font-weight: 700;
+            transition: all 0.3s ease;
+        }
+
+        .remove-btn:hover {
+            background: #ff4757;
+            color: #0d1b2a;
+            box-shadow: 0 0 10px rgba(255,71,87,0.5);
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            opacity: 0.6;
+        }
+
+        .empty-icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+        }
+
+        .toast {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%) translateY(-100px);
+            background: #00ff9f;
+            color: #0d1b2a;
+            padding: 15px 25px;
+            border-radius: 4px;
+            font-family: 'Orbitron', monospace;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            transition: transform 0.3s ease;
+            z-index: 1000;
+            box-shadow: 0 0 20px rgba(0,255,159,0.5);
+        }
+
+        .toast.show {
+            transform: translateX(-50%) translateY(0);
+        }
+
+        .toast.error {
+            background: #ff4757;
+            color: white;
+            box-shadow: 0 0 20px rgba(255,71,87,0.5);
+        }
+
+        .blink {
+            animation: blink 1s infinite;
+        }
+
+        @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0.3; }
+        }
+
+        @media (max-width: 768px) {
+            .add-form {
+                grid-template-columns: 1fr;
+                gap: 20px;
+            }
+            
+            .contact-item {
+                grid-template-columns: 1fr;
+                gap: 10px;
+                text-align: left;
+            }
+            
+            .stats {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="terminal">
+        <div class="header">
+            &gt; FILTER CONTROL SYSTEM v2.1
+        </div>
+        
+        <div class="content">
+            <div class="status-bar">
+                <div class="status-item">
+                    STATUS: <span class="blink">ONLINE</span>
+                </div>
+                <div class="status-item">
+                    UPTIME: 02:34:12
+                </div>
+                <div class="status-item">
+                    DESTINATION: <span id="webhookStatus">CONFIGURED</span>
+                </div>
+            </div>
+
+            <div class="stats">
+                <div class="stat-box">
+                    <div class="stat-number" id="totalContacts">0</div>
+                    <div class="stat-label">ACTIVE CONTACTS</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-number" id="todayMessages">0</div>
+                    <div class="stat-label">MESSAGES TODAY</div>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-header">WEBHOOK DESTINATION</div>
+                <div class="section-content">
+                    <div class="input-group">
+                        <div class="input-label">N8N WEBHOOK URL</div>
+                        <input 
+                            type="url" 
+                            class="input-field" 
+                            placeholder="https://your-n8n.com/webhook/evolution"
+                            id="webhookInput"
+                            value="https://n8n.example.com/webhook/evolution"
+                        >
+                    </div>
+                    <button class="btn" onclick="updateWebhook()" style="margin-top: 15px;">UPDATE WEBHOOK</button>
+                    <button class="btn" onclick="testWebhook()" style="margin-top: 15px; margin-left: 10px;">TEST WEBHOOK</button>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-header">+ ADD NEW CONTACT</div>
+                <div class="section-content">
+                    <div class="add-form">
+                        <div class="input-group">
+                            <div class="input-label">PHONE NUMBER</div>
+                            <input 
+                                type="tel" 
+                                class="input-field" 
+                                placeholder="972-50-123-4567"
+                                id="phoneInput"
+                            >
+                        </div>
+                        <div class="input-group">
+                            <div class="input-label">CONTACT NAME</div>
+                            <input 
+                                type="text" 
+                                class="input-field" 
+                                placeholder="CLIENT NAME"
+                                id="nameInput"
+                            >
+                        </div>
+                        <div class="input-group">
+                            <div class="input-label">TYPE</div>
+                            <select class="input-field" id="typeInput">
+                                <option value="PERSONAL">PERSONAL</option>
+                                <option value="BUSINESS">BUSINESS</option>
+                                <option value="SUPPLIER">SUPPLIER</option>
+                                <option value="VIP">VIP</option>
+                            </select>
+                        </div>
+                        <button class="btn" onclick="addContact()">ADD</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-header">AUTHORIZED CONTACTS</div>
+                <div class="section-content">
+                    <div id="contactsList" class="contact-list">
+                        <!-- האנשי קשר יופיעו כאן -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+        // נתונים דמה - בפועל יגיעו מהשרת
+        let contacts = [
+            { phone: '972-50-123-4567', name: 'MOM', type: 'PERSONAL' },
+            { phone: '972-54-987-6543', name: 'VIP CLIENT', type: 'VIP' },
+            { phone: '972-52-555-1234', name: 'PARTS SUPPLIER', type: 'SUPPLIER' }
+        ];
+
+        function getContactType(name) {
+            const businessKeywords = ['לקוח', 'חברה', 'ספק', 'עסק', 'משרד'];
+            const personalKeywords = ['אמא', 'אבא', 'אח', 'אחות', 'חבר', 'משפחה'];
+            
+            const lowerName = name.toLowerCase();
+            
+            if (personalKeywords.some(word => lowerName.includes(word))) {
+                return 'אישי';
+            } else if (businessKeywords.some(word => lowerName.includes(word))) {
+                return 'עסקי';
+            } else {
+                return 'כללי';
+            }
+        }
+
+        function renderContacts() {
+            const list = document.getElementById('contactsList');
+            
+            if (contacts.length === 0) {
+                list.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-icon">⊗</div>
+                        <div>NO CONTACTS FOUND</div>
+                    </div>
+                `;
+                document.getElementById('totalContacts').textContent = '0';
+                return;
+            }
+
+            list.innerHTML = contacts.map((contact, index) => `
+                <div class="contact-item">
+                    <div class="contact-number">${contact.phone}</div>
+                    <div class="contact-name">${contact.name}</div>
+                    <div class="contact-type">${contact.type}</div>
+                    <button class="remove-btn" onclick="removeContact(${index})">×</button>
+                </div>
+            `).join('');
+
+            document.getElementById('totalContacts').textContent = contacts.length;
+        }
+
+        function validatePhone(phone) {
+            // בדיקת פורמט מספר ישראלי
+            const phoneRegex = /^972[-\s]?[1-9]\d{1}[-\s]?\d{3}[-\s]?\d{4}$/;
+            const cleaned = phone.replace(/[-\s]/g, '');
+            return phoneRegex.test(phone) && cleaned.length >= 12 && cleaned.length <= 13;
+        }
+
+        function validateName(name) {
+            // בדיקת אורך ותווים מותרים
+            if (name.length < 2 || name.length > 50) return false;
+            const nameRegex = /^[a-zA-Z\u0590-\u05FF\s]+$/; // אנגלית + עברית + רווחים
+            return nameRegex.test(name);
+        }
+
+        function sanitizeInput(input) {
+            // מניעת XSS
+            return input.replace(/[<>\"'&]/g, '');
+        }
+
+        function saveToStorage() {
+            try {
+                localStorage.setItem('filterContacts', JSON.stringify(contacts));
+                localStorage.setItem('filterWebhook', document.getElementById('webhookInput').value);
+            } catch (e) {
+                console.error('Failed to save to localStorage');
+            }
+        }
+
+        function loadFromStorage() {
+            try {
+                const savedContacts = localStorage.getItem('filterContacts');
+                const savedWebhook = localStorage.getItem('filterWebhook');
+                
+                if (savedContacts) {
+                    contacts = JSON.parse(savedContacts);
+                }
+                
+                if (savedWebhook) {
+                    document.getElementById('webhookInput').value = savedWebhook;
+                }
+            } catch (e) {
+                console.error('Failed to load from localStorage');
+            }
+        }
+
+        async function testWebhook() {
+            const webhookUrl = document.getElementById('webhookInput').value;
+            if (!webhookUrl) {
+                showToast('NO WEBHOOK URL', 'error');
+                return;
+            }
+
+            try {
+                const testMessage = {
+                    test: true,
+                    timestamp: Date.now(),
+                    message: 'FILTER_SYSTEM_TEST'
+                };
+                
+                // Mock test - בפועל נשלח לשרת שיבדוק
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                showToast('WEBHOOK TEST OK');
+                document.getElementById('webhookStatus').textContent = 'TESTED';
+            } catch (error) {
+                showToast('WEBHOOK TEST FAILED', 'error');
+                document.getElementById('webhookStatus').textContent = 'ERROR';
+            }
+        }
+
+        function updateWebhook() {
+            const webhookInput = document.getElementById('webhookInput');
+            const url = webhookInput.value.trim();
+
+            if (!url) {
+                showToast('MISSING URL', 'error');
+                return;
+            }
+
+            if (!url.startsWith('http')) {
+                showToast('INVALID URL', 'error');
+                return;
+            }
+
+            // בפועל - שליחה לשרת לעדכון הגדרות
+            showToast('WEBHOOK UPDATED');
+        }
+
+        function updateWebhook() {
+            const webhookInput = document.getElementById('webhookInput');
+            const url = webhookInput.value.trim();
+
+            if (!url) {
+                showToast('MISSING URL', 'error');
+                return;
+            }
+
+            if (!url.startsWith('https://')) {
+                showToast('MUST USE HTTPS', 'error');
+                return;
+            }
+
+            try {
+                new URL(url); // בדיקת תקינות URL
+            } catch {
+                showToast('INVALID URL FORMAT', 'error');
+                return;
+            }
+
+            saveToStorage();
+            showToast('WEBHOOK UPDATED');
+            document.getElementById('webhookStatus').textContent = 'UPDATED';
+        }
+
+        function addContact() {
+            const phoneInput = document.getElementById('phoneInput');
+            const nameInput = document.getElementById('nameInput');
+            const typeInput = document.getElementById('typeInput');
+            
+            let phone = phoneInput.value.trim();
+            let name = nameInput.value.trim();
+            const type = typeInput.value;
+
+            // Validation
+            if (!phone || !name) {
+                showToast('MISSING DATA', 'error');
+                return;
+            }
+
+            if (!validatePhone(phone)) {
+                showToast('INVALID PHONE FORMAT', 'error');
+                phoneInput.focus();
+                return;
+            }
+
+            if (!validateName(name)) {
+                showToast('INVALID NAME (2-50 CHARS)', 'error');
+                nameInput.focus();
+                return;
+            }
+
+            // Sanitize
+            phone = sanitizeInput(phone);
+            name = sanitizeInput(name);
+
+            if (contacts.some(c => c.phone === phone)) {
+                showToast('CONTACT EXISTS', 'error');
+                return;
+            }
+
+            const newContact = { phone, name, type };
+            contacts.push(newContact);
+            
+            // Clear inputs
+            phoneInput.value = '';
+            nameInput.value = '';
+            typeInput.value = 'PERSONAL';
+            
+            saveToStorage();
+            renderContacts();
+            showToast('CONTACT ADDED');
+        }
+
+        function removeContact(index) {
+            if (index < 0 || index >= contacts.length) return;
+            
+            contacts.splice(index, 1);
+            saveToStorage();
+            renderContacts();
+            showToast('CONTACT REMOVED');
+        }
+
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = `toast ${type === 'error' ? 'error' : ''}`;
+            toast.classList.add('show');
+            
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 2000);
+        }
+
+        // Enter key בשדות הקלט
+        document.getElementById('phoneInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                document.getElementById('nameInput').focus();
+            }
+        });
+
+        document.getElementById('nameInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                document.getElementById('typeInput').focus();
+            }
+        });
+
+        document.getElementById('typeInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                addContact();
+            }
+        });
+
+        // סימולציה של עדכון מונה הודעות
+        let messageCount = 15;
+        setInterval(() => {
+            if (Math.random() > 0.7) {
+                messageCount += Math.floor(Math.random() * 3) + 1;
+                document.getElementById('todayMessages').textContent = messageCount;
+            }
+        }, 5000);
+
+        // טעינה ראשונית
+        document.getElementById('todayMessages').textContent = messageCount;
+        loadFromStorage(); // טעינת נתונים שמורים
+        renderContacts();
+    </script>
+</body>
+</html>
