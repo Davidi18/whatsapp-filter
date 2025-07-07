@@ -5,16 +5,18 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies (more forgiving)
+# Install dependencies
 RUN npm install --production
 
-# Copy app
+# Copy application code
 COPY . .
 
-# Create config
+# Create config directory
 RUN mkdir -p config && \
     echo '{"allowedNumbers":[],"stats":{"totalMessages":0,"filteredMessages":0,"allowedMessages":0}}' > config/contacts.json
 
+# Expose port
 EXPOSE 3000
 
+# Start application
 CMD ["npm", "start"]
