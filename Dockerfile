@@ -12,11 +12,14 @@ RUN npm ci --only=production
 # Copy application code
 COPY . .
 
-# Create config directory
-RUN mkdir -p config
+# Create config directory and set permissions
+RUN mkdir -p /app/config && \
+    chown -R node:node /app
 
-# Set permissions
-RUN chown -R node:node /app
+# Create default config if it doesn't exist
+RUN echo '{"webhookUrl":"","allowedNumbers":[],"stats":{"totalMessages":0,"filteredMessages":0,"allowedMessages":0}}' > /app/config/contacts.json
+
+# Switch to non-root user
 USER node
 
 # Expose port
@@ -24,7 +27,7 @@ EXPOSE 3000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:3000/health || exit 1
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
 
 # Start application
 CMD ["npm", "start"]
