@@ -334,7 +334,7 @@
                     UPTIME: 02:34:12
                 </div>
                 <div class="status-item">
-                    DESTINATION: <span id="webhookStatus">CONFIGURED</span>
+                    WEBHOOK: <span id="webhookStatus">CONFIGURED</span>
                 </div>
             </div>
 
@@ -346,24 +346,6 @@
                 <div class="stat-box">
                     <div class="stat-number" id="todayMessages">0</div>
                     <div class="stat-label">MESSAGES TODAY</div>
-                </div>
-            </div>
-
-            <div class="section">
-                <div class="section-header">WEBHOOK DESTINATION</div>
-                <div class="section-content">
-                    <div class="input-group">
-                        <div class="input-label">N8N WEBHOOK URL</div>
-                        <input 
-                            type="url" 
-                            class="input-field" 
-                            placeholder="https://your-n8n.com/webhook/evolution"
-                            id="webhookInput"
-                            value="https://n8n.example.com/webhook/evolution"
-                        >
-                    </div>
-                    <button class="btn" onclick="updateWebhook()" style="margin-top: 15px;">UPDATE WEBHOOK</button>
-                    <button class="btn" onclick="testWebhook()" style="margin-top: 15px; margin-left: 10px;">TEST WEBHOOK</button>
                 </div>
             </div>
 
