@@ -129,7 +129,6 @@ async function saveConfig() {
 
 // Apply authentication and IP whitelist to admin routes
 app.use('/api', basicAuth);
-app.use('/', ipWhitelist);
 
 // Serve static files with authentication
 app.use(express.static('public', { 
