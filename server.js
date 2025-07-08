@@ -129,6 +129,7 @@ async function saveConfig() {
 
 // Apply authentication and IP whitelist to admin routes
 app.use('/api', basicAuth);
+app.use('/', ipWhitelist);
 
 // Serve static files with authentication
 app.use(express.static('public', { 
@@ -148,7 +149,190 @@ app.get('/health', (req, res) => {
     uptime: process.uptime(),
     memory: process.memoryUsage(),
     timestamp: new Date().toISOString(),
-    webhook_configured: !!config.webhookUrl
+    webhook_configured: !!config.webhookUrl,
+    total_contacts: config.allowedNumbers?.length || 0,
+    version: '2.1.0',
+    endpoints: {
+      admin_ui: '/',
+      api_docs: '/docs',
+      health: '/health',
+      filter: '/filter'
+    }
+  });
+});
+
+// API Documentation
+app.get('/docs', (req, res) => {
+  res.json({
+    title: "WhatsApp Filter API Documentation",
+    version: "2.1.0",
+    base_url: req.protocol + '://' + req.get('host'),
+    authentication: "Basic Auth required for all /api/* endpoints",
+    endpoints: {
+      "GET /health": {
+        description: "System health check",
+        auth_required: false,
+        response: "System status and basic info"
+      },
+      "GET /docs": {
+        description: "API documentation",
+        auth_required: false,
+        response: "This documentation"
+      },
+      "POST /filter": {
+        description: "Webhook endpoint for Evolution API",
+        auth_required: false,
+        body: "Evolution API message format",
+        response: "OK"
+      },
+      "GET /api/config": {
+        description: "Get all contacts and system stats",
+        auth_required: true,
+        response: {
+          contacts: "Array of contact objects",
+          webhookUrl: "Configured webhook URL",
+          stats: "Message statistics",
+          webhookFromEnv: "Boolean"
+        }
+      },
+      "POST /api/contacts": {
+        description: "Replace entire contacts list",
+        auth_required: true,
+        body: {
+          contacts: [
+            {
+              phone: "972-XX-XXX-XXXX",
+              name: "Contact Name",
+              type: "PERSONAL|BUSINESS|VIP|TEMP"
+            }
+          ]
+        },
+        response: { success: true }
+      },
+      "POST /api/contacts/add": {
+        description: "Add single contact",
+        auth_required: true,
+        body: {
+          phone: "972-XX-XXX-XXXX (required)",
+          name: "Contact Name (required, 2-50 chars)",
+          type: "PERSONAL|BUSINESS|VIP|TEMP (required)"
+        },
+        response: {
+          success: true,
+          contact: "Added contact object"
+        },
+        errors: {
+          400: "Missing/invalid fields",
+          409: "Contact already exists"
+        }
+      },
+      "GET /api/contacts/:phone": {
+        description: "Get specific contact",
+        auth_required: true,
+        params: {
+          phone: "Phone number (e.g., 972555074798)"
+        },
+        response: {
+          success: true,
+          contact: "Contact object"
+        },
+        errors: {
+          404: "Contact not found"
+        }
+      },
+      "PUT /api/contacts/:phone": {
+        description: "Update contact name and/or type",
+        auth_required: true,
+        params: {
+          phone: "Phone number to update"
+        },
+        body: {
+          name: "New name (optional, 2-50 chars)",
+          type: "New type (optional: PERSONAL|BUSINESS|VIP|TEMP)"
+        },
+        response: {
+          success: true,
+          contact: "Updated contact object"
+        },
+        errors: {
+          404: "Contact not found",
+          400: "Invalid field values"
+        }
+      },
+      "DELETE /api/contacts/:phone": {
+        description: "Remove contact",
+        auth_required: true,
+        params: {
+          phone: "Phone number to remove"
+        },
+        response: {
+          success: true,
+          removed: "Removed contact object"
+        },
+        errors: {
+          404: "Contact not found"
+        }
+      },
+      "POST /api/test-webhook": {
+        description: "Test webhook connection to n8n",
+        auth_required: true,
+        response: {
+          success: true
+        },
+        errors: {
+          400: "No webhook configured",
+          500: "Webhook test failed"
+        }
+      }
+    },
+    examples: {
+      add_contact: {
+        url: "POST /api/contacts/add",
+        headers: {
+          "Authorization": "Basic YWRtaW46cGFzc3dvcmQ=",
+          "Content-Type": "application/json"
+        },
+        body: {
+          phone: "972501234567",
+          name: "John Doe",
+          type: "BUSINESS"
+        }
+      },
+      update_contact: {
+        url: "PUT /api/contacts/972501234567",
+        headers: {
+          "Authorization": "Basic YWRtaW46cGFzc3dvcmQ=",
+          "Content-Type": "application/json"
+        },
+        body: {
+          type: "VIP"
+        }
+      }
+    },
+    curl_examples: {
+      add_contact: `curl -X POST ${req.protocol}://${req.get('host')}/api/contacts/add \\
+  -u "admin:password" \\
+  -H "Content-Type: application/json" \\
+  -d '{"phone": "972501234567", "name": "John Doe", "type": "BUSINESS"}'`,
+      get_contacts: `curl -X GET ${req.protocol}://${req.get('host')}/api/config \\
+  -u "admin:password"`,
+      delete_contact: `curl -X DELETE ${req.protocol}://${req.get('host')}/api/contacts/972501234567 \\
+  -u "admin:password"`
+    },
+    contact_types: {
+      PERSONAL: "Personal contacts (friends, family)",
+      BUSINESS: "Business contacts (clients, partners)",
+      VIP: "VIP contacts (priority handling)",
+      TEMP: "Temporary contacts (short-term access)"
+    },
+    phone_format: "Israeli format: 972-XX-XXX-XXXX or 972XXXXXXXXX",
+    notes: [
+      "All /api/* endpoints require Basic Authentication",
+      "Phone numbers are stored without formatting but validated on input", 
+      "Contact names must be 2-50 characters",
+      "Webhook URL is configured via WEBHOOK_URL environment variable",
+      "System automatically forwards messages from allowed contacts to configured webhook"
+    ]
   });
 });
 
@@ -184,6 +368,121 @@ app.post('/api/contacts', async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: 'Failed to update contacts' });
+  }
+});
+
+// Add single contact
+app.post('/api/contacts/add', async (req, res) => {
+  try {
+    const { phone, name, type } = req.body;
+    
+    if (!phone || !name || !type) {
+      return res.status(400).json({ error: 'Missing required fields: phone, name, type' });
+    }
+
+    // Validate phone format
+    const phoneRegex = /^972[-\s]?[1-9]\d{1}[-\s]?\d{3}[-\s]?\d{4}$/;
+    if (!phoneRegex.test(phone)) {
+      return res.status(400).json({ error: 'Invalid phone format' });
+    }
+
+    // Validate name
+    if (name.length < 2 || name.length > 50) {
+      return res.status(400).json({ error: 'Name must be 2-50 characters' });
+    }
+
+    // Validate type
+    const validTypes = ['PERSONAL', 'BUSINESS', 'VIP', 'TEMP'];
+    if (!validTypes.includes(type)) {
+      return res.status(400).json({ error: 'Invalid type. Must be: PERSONAL, BUSINESS, VIP, or TEMP' });
+    }
+
+    // Check if contact already exists
+    if (config.allowedNumbers.some(c => c.phone === phone)) {
+      return res.status(409).json({ error: 'Contact already exists' });
+    }
+
+    const newContact = { phone, name, type };
+    config.allowedNumbers.push(newContact);
+    await saveConfig();
+    
+    res.json({ success: true, contact: newContact });
+  } catch (error) {
+    console.error('Failed to add contact:', error);
+    res.status(500).json({ error: 'Failed to add contact' });
+  }
+});
+
+// Update single contact
+app.put('/api/contacts/:phone', async (req, res) => {
+  try {
+    const phone = req.params.phone;
+    const { name, type } = req.body;
+    
+    const contactIndex = config.allowedNumbers.findIndex(c => c.phone === phone);
+    if (contactIndex === -1) {
+      return res.status(404).json({ error: 'Contact not found' });
+    }
+
+    const contact = config.allowedNumbers[contactIndex];
+
+    // Update fields if provided
+    if (name !== undefined) {
+      if (name.length < 2 || name.length > 50) {
+        return res.status(400).json({ error: 'Name must be 2-50 characters' });
+      }
+      contact.name = name;
+    }
+
+    if (type !== undefined) {
+      const validTypes = ['PERSONAL', 'BUSINESS', 'VIP', 'TEMP'];
+      if (!validTypes.includes(type)) {
+        return res.status(400).json({ error: 'Invalid type. Must be: PERSONAL, BUSINESS, VIP, or TEMP' });
+      }
+      contact.type = type;
+    }
+    
+    await saveConfig();
+    res.json({ success: true, contact });
+  } catch (error) {
+    console.error('Failed to update contact:', error);
+    res.status(500).json({ error: 'Failed to update contact' });
+  }
+});
+
+// Delete single contact
+app.delete('/api/contacts/:phone', async (req, res) => {
+  try {
+    const phone = req.params.phone;
+    const contactIndex = config.allowedNumbers.findIndex(c => c.phone === phone);
+    
+    if (contactIndex === -1) {
+      return res.status(404).json({ error: 'Contact not found' });
+    }
+
+    const removedContact = config.allowedNumbers.splice(contactIndex, 1)[0];
+    await saveConfig();
+    
+    res.json({ success: true, removed: removedContact });
+  } catch (error) {
+    console.error('Failed to remove contact:', error);
+    res.status(500).json({ error: 'Failed to remove contact' });
+  }
+});
+
+// Get single contact
+app.get('/api/contacts/:phone', async (req, res) => {
+  try {
+    const phone = req.params.phone;
+    const contact = config.allowedNumbers.find(c => c.phone === phone);
+    
+    if (!contact) {
+      return res.status(404).json({ error: 'Contact not found' });
+    }
+    
+    res.json({ success: true, contact });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to get contact' });
   }
 });
 
@@ -232,52 +531,26 @@ app.post('/filter', async (req, res) => {
     const message = req.body;
     config.stats.totalMessages++;
     
-    // Log the entire incoming message structure
-    console.log('🔵 FULL MESSAGE STRUCTURE:', JSON.stringify(message, null, 2));
-    
-    // Try different possible paths for the phone number
-    const remoteJid1 = message.key?.remoteJid || '';
-    const remoteJid2 = message.remoteJid || '';
-    const remoteJid3 = message.data?.key?.remoteJid || '';
-    const remoteJid4 = message.messages?.[0]?.key?.remoteJid || '';
-    
-    console.log(`📞 Trying paths:`);
-    console.log(`   message.key?.remoteJid: "${remoteJid1}"`);
-    console.log(`   message.remoteJid: "${remoteJid2}"`);
-    console.log(`   message.data?.key?.remoteJid: "${remoteJid3}"`);
-    console.log(`   message.messages?.[0]?.key?.remoteJid: "${remoteJid4}"`);
-    
-    // Find the actual phone number
-    const actualRemoteJid = remoteJid1 || remoteJid2 || remoteJid3 || remoteJid4;
-    const phoneNumber = actualRemoteJid.replace('@s.whatsapp.net', '');
-    
-    console.log(`📞 Final extracted phone: "${phoneNumber}"`);
+    // Extract phone number
+    const remoteJid = message.key?.remoteJid || '';
+    const phoneNumber = remoteJid.replace('@s.whatsapp.net', '');
     
     // Skip groups and status updates
-    if (actualRemoteJid.includes('@g.us') || actualRemoteJid.includes('status@broadcast')) {
+    if (remoteJid.includes('@g.us') || remoteJid.includes('status@broadcast')) {
       config.stats.filteredMessages++;
-      console.log('🚫 Filtered: Group or status message');
       return res.status(200).send('OK');
     }
 
     // Check if number is allowed
-    const cleanedIncoming = phoneNumber.replace(/[-\s]/g, '');
-    console.log(`🔍 Cleaned incoming: "${cleanedIncoming}"`);
-    console.log(`📋 Allowed numbers:`, config.allowedNumbers.map(c => c.phone));
-    
-    const isAllowed = config.allowedNumbers.some(contact => {
-      const cleanedContact = contact.phone.replace(/[-\s]/g, '');
-      console.log(`🔍 Comparing "${cleanedIncoming}" with "${cleanedContact}"`);
-      return cleanedContact === cleanedIncoming;
-    });
-
-    console.log(`✅ Is allowed: ${isAllowed}`);
+    const isAllowed = config.allowedNumbers.some(contact => 
+      contact.phone.replace(/[-\s]/g, '') === phoneNumber.replace(/[-\s]/g, '')
+    );
 
     if (isAllowed && config.webhookUrl) {
       // Forward to n8n
       try {
         await axios.post(config.webhookUrl, message, {
-          timeout: 10000,
+          timeout: 5000,
           headers: {
             'Content-Type': 'application/json',
             'X-Filter-Source': 'whatsapp-filter',
@@ -291,11 +564,7 @@ app.post('/filter', async (req, res) => {
       }
     } else {
       config.stats.filteredMessages++;
-      if (!isAllowed) {
-        console.log(`🚫 Message filtered from ${phoneNumber} - Not in allowed list`);
-      } else {
-        console.log(`🚫 Message filtered from ${phoneNumber} - No webhook URL configured`);
-      }
+      console.log(`🚫 Message filtered from ${phoneNumber}`);
     }
 
     // Auto-save stats every 100 messages
@@ -306,7 +575,6 @@ app.post('/filter', async (req, res) => {
     res.status(200).send('OK');
   } catch (error) {
     console.error('❌ Filter error:', error);
-    console.error('❌ Full error:', JSON.stringify(error, null, 2));
     res.status(500).send('Error');
   }
 });
