@@ -126,7 +126,7 @@
 
         .add-form {
             display: grid;
-            grid-template-columns: 1fr 1fr 1fr 120px;
+            grid-template-columns: 1.2fr 1.2fr 0.8fr 100px;
             gap: 15px;
             align-items: end;
         }
@@ -173,7 +173,7 @@
             background: transparent;
             border: 2px solid #00ff9f;
             color: #00ff9f;
-            padding: 12px 20px;
+            padding: 12px 15px;
             font-family: 'Orbitron', monospace;
             font-weight: 700;
             text-transform: uppercase;
@@ -181,6 +181,8 @@
             cursor: pointer;
             border-radius: 4px;
             transition: all 0.3s ease;
+            white-space: nowrap;
+            min-width: 80px;
         }
 
         .btn:hover {
