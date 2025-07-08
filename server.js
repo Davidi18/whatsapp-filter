@@ -232,20 +232,35 @@ app.post('/filter', async (req, res) => {
     const message = req.body;
     config.stats.totalMessages++;
     
+    // Log the entire incoming message for debugging
+    console.log('🔵 RAW MESSAGE:', JSON.stringify(message, null, 2));
+    
     // Extract phone number
     const remoteJid = message.key?.remoteJid || '';
     const phoneNumber = remoteJid.replace('@s.whatsapp.net', '');
     
+    console.log(`📞 Raw remoteJid: "${remoteJid}"`);
+    console.log(`📞 Extracted phone: "${phoneNumber}"`);
+    console.log(`📋 Allowed numbers:`, config.allowedNumbers.map(c => c.phone));
+    
     // Skip groups and status updates
     if (remoteJid.includes('@g.us') || remoteJid.includes('status@broadcast')) {
       config.stats.filteredMessages++;
+      console.log('🚫 Filtered: Group or status message');
       return res.status(200).send('OK');
     }
 
     // Check if number is allowed
-    const isAllowed = config.allowedNumbers.some(contact => 
-      contact.phone.replace(/[-\s]/g, '') === phoneNumber.replace(/[-\s]/g, '')
-    );
+    const cleanedIncoming = phoneNumber.replace(/[-\s]/g, '');
+    console.log(`🔍 Cleaned incoming: "${cleanedIncoming}"`);
+    
+    const isAllowed = config.allowedNumbers.some(contact => {
+      const cleanedContact = contact.phone.replace(/[-\s]/g, '');
+      console.log(`🔍 Comparing "${cleanedIncoming}" with "${cleanedContact}"`);
+      return cleanedContact === cleanedIncoming;
+    });
+
+    console.log(`✅ Is allowed: ${isAllowed}`);
 
     if (isAllowed && config.webhookUrl) {
       // Forward to n8n
@@ -265,7 +280,7 @@ app.post('/filter', async (req, res) => {
       }
     } else {
       config.stats.filteredMessages++;
-      console.log(`🚫 Message filtered from ${phoneNumber}`);
+      console.log(`🚫 Message filtered from ${phoneNumber} - Not in allowed list or no webhook URL`);
     }
 
     // Auto-save stats every 100 messages
