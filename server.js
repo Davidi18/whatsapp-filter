@@ -232,19 +232,29 @@ app.post('/filter', async (req, res) => {
     const message = req.body;
     config.stats.totalMessages++;
     
-    // Log the entire incoming message for debugging
-    console.log('🔵 RAW MESSAGE:', JSON.stringify(message, null, 2));
+    // Log the entire incoming message structure
+    console.log('🔵 FULL MESSAGE STRUCTURE:', JSON.stringify(message, null, 2));
     
-    // Extract phone number
-    const remoteJid = message.key?.remoteJid || '';
-    const phoneNumber = remoteJid.replace('@s.whatsapp.net', '');
+    // Try different possible paths for the phone number
+    const remoteJid1 = message.key?.remoteJid || '';
+    const remoteJid2 = message.remoteJid || '';
+    const remoteJid3 = message.data?.key?.remoteJid || '';
+    const remoteJid4 = message.messages?.[0]?.key?.remoteJid || '';
     
-    console.log(`📞 Raw remoteJid: "${remoteJid}"`);
-    console.log(`📞 Extracted phone: "${phoneNumber}"`);
-    console.log(`📋 Allowed numbers:`, config.allowedNumbers.map(c => c.phone));
+    console.log(`📞 Trying paths:`);
+    console.log(`   message.key?.remoteJid: "${remoteJid1}"`);
+    console.log(`   message.remoteJid: "${remoteJid2}"`);
+    console.log(`   message.data?.key?.remoteJid: "${remoteJid3}"`);
+    console.log(`   message.messages?.[0]?.key?.remoteJid: "${remoteJid4}"`);
+    
+    // Find the actual phone number
+    const actualRemoteJid = remoteJid1 || remoteJid2 || remoteJid3 || remoteJid4;
+    const phoneNumber = actualRemoteJid.replace('@s.whatsapp.net', '');
+    
+    console.log(`📞 Final extracted phone: "${phoneNumber}"`);
     
     // Skip groups and status updates
-    if (remoteJid.includes('@g.us') || remoteJid.includes('status@broadcast')) {
+    if (actualRemoteJid.includes('@g.us') || actualRemoteJid.includes('status@broadcast')) {
       config.stats.filteredMessages++;
       console.log('🚫 Filtered: Group or status message');
       return res.status(200).send('OK');
@@ -253,6 +263,7 @@ app.post('/filter', async (req, res) => {
     // Check if number is allowed
     const cleanedIncoming = phoneNumber.replace(/[-\s]/g, '');
     console.log(`🔍 Cleaned incoming: "${cleanedIncoming}"`);
+    console.log(`📋 Allowed numbers:`, config.allowedNumbers.map(c => c.phone));
     
     const isAllowed = config.allowedNumbers.some(contact => {
       const cleanedContact = contact.phone.replace(/[-\s]/g, '');
@@ -266,7 +277,7 @@ app.post('/filter', async (req, res) => {
       // Forward to n8n
       try {
         await axios.post(config.webhookUrl, message, {
-          timeout: 5000,
+          timeout: 10000,
           headers: {
             'Content-Type': 'application/json',
             'X-Filter-Source': 'whatsapp-filter',
@@ -280,7 +291,11 @@ app.post('/filter', async (req, res) => {
       }
     } else {
       config.stats.filteredMessages++;
-      console.log(`🚫 Message filtered from ${phoneNumber} - Not in allowed list or no webhook URL`);
+      if (!isAllowed) {
+        console.log(`🚫 Message filtered from ${phoneNumber} - Not in allowed list`);
+      } else {
+        console.log(`🚫 Message filtered from ${phoneNumber} - No webhook URL configured`);
+      }
     }
 
     // Auto-save stats every 100 messages
@@ -291,6 +306,7 @@ app.post('/filter', async (req, res) => {
     res.status(200).send('OK');
   } catch (error) {
     console.error('❌ Filter error:', error);
+    console.error('❌ Full error:', JSON.stringify(error, null, 2));
     res.status(500).send('Error');
   }
 });
