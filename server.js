@@ -24,6 +24,7 @@ const logger = require('./utils/logger');
 const { isValidPhone, isValidGroupId, isValidContactType, isValidName, normalizeGroupId } = require('./utils/validators');
 
 const app = express();
+app.set('trust proxy', 1); // Trust first proxy (nginx, Cloudflare, etc.)
 const PORT = process.env.PORT || 3000;
 const VERSION = '2.0.0';
 const startedAt = new Date().toISOString();
