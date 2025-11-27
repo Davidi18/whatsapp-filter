@@ -74,7 +74,7 @@
 
         .stats {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: 1fr 1fr 1fr;
             gap: 20px;
             margin-bottom: 40px;
         }
@@ -421,11 +421,15 @@
             <div class="stats">
                 <div class="stat-box">
                     <div class="stat-number" id="totalContacts">-</div>
-                    <div class="stat-label">ACTIVE CONTACTS</div>
+                    <div class="stat-label">CONTACTS</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-number" id="totalGroups">-</div>
+                    <div class="stat-label">GROUPS</div>
                 </div>
                 <div class="stat-box">
                     <div class="stat-number" id="todayMessages">-</div>
-                    <div class="stat-label">MESSAGES TODAY</div>
+                    <div class="stat-label">MESSAGES</div>
                 </div>
             </div>
 
@@ -479,6 +483,48 @@
                     </div>
                 </div>
             </div>
+
+            <div class="section">
+                <div class="section-header">+ ADD NEW GROUP</div>
+                <div class="section-content">
+                    <div class="add-form" style="grid-template-columns: 1fr 1fr auto;">
+                        <div class="input-group">
+                            <div class="input-label">GROUP ID</div>
+                            <input
+                                type="text"
+                                class="input-field"
+                                placeholder="120363012345678901"
+                                id="groupIdInput"
+                            >
+                        </div>
+                        <div class="input-group">
+                            <div class="input-label">GROUP NAME</div>
+                            <input
+                                type="text"
+                                class="input-field"
+                                placeholder="GROUP NAME"
+                                id="groupNameInput"
+                            >
+                        </div>
+                        <div class="input-group">
+                            <div class="input-label">&nbsp;</div>
+                            <button class="btn" onclick="addGroup()">ADD</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-header">AUTHORIZED GROUPS</div>
+                <div class="section-content">
+                    <div id="groupsList" class="contact-list">
+                        <div class="empty-state">
+                            <div class="empty-icon">⊗</div>
+                            <div>NO GROUPS FOUND</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -487,6 +533,7 @@
     <script>
         // START COMPLETELY EMPTY - NO DEMO DATA
         let contacts = [];
+        let groups = [];
         let stats = { totalMessages: 0, filteredMessages: 0, allowedMessages: 0 };
 
         // Load data from server
@@ -496,13 +543,15 @@
                 if (response.ok) {
                     const data = await response.json();
                     contacts = data.contacts || [];
+                    groups = data.groups || [];
                     stats = data.stats || stats;
-                    
+
                     renderContacts();
+                    renderGroups();
                     updateStats();
-                    
+
                     document.getElementById('systemStatus').textContent = 'ONLINE';
-                    
+
                     if (data.webhookFromEnv) {
                         document.getElementById('webhookStatus').textContent = 'ENV';
                     } else {
@@ -559,6 +608,7 @@
 
         function updateStats() {
             document.getElementById('totalContacts').textContent = contacts.length;
+            document.getElementById('totalGroups').textContent = groups.length;
             document.getElementById('todayMessages').textContent = stats.allowedMessages || 0;
         }
 
@@ -658,10 +708,10 @@
 
         async function removeContact(index) {
             if (index < 0 || index >= contacts.length) return;
-            
+
             const removedContact = contacts[index];
             contacts.splice(index, 1);
-            
+
             try {
                 await saveContacts();
                 renderContacts();
@@ -669,6 +719,119 @@
             } catch (error) {
                 contacts.splice(index, 0, removedContact);
                 renderContacts();
+            }
+        }
+
+        // ============ GROUP FUNCTIONS ============
+
+        function validateGroupId(groupId) {
+            const groupIdRegex = /^\d{10,25}$/;
+            return groupIdRegex.test(groupId);
+        }
+
+        function renderGroups() {
+            const list = document.getElementById('groupsList');
+
+            if (groups.length === 0) {
+                list.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-icon">⊗</div>
+                        <div>NO GROUPS FOUND</div>
+                    </div>
+                `;
+                updateStats();
+                return;
+            }
+
+            list.innerHTML = groups.map((group, index) => `
+                <div class="contact-item" style="grid-template-columns: 1fr 1fr 60px;">
+                    <div class="contact-number">${group.groupId}</div>
+                    <div class="contact-name">${group.name}</div>
+                    <button class="remove-btn" onclick="removeGroup(${index})">×</button>
+                </div>
+            `).join('');
+
+            updateStats();
+        }
+
+        async function addGroup() {
+            const groupIdInput = document.getElementById('groupIdInput');
+            const groupNameInput = document.getElementById('groupNameInput');
+
+            let groupId = groupIdInput.value.trim();
+            let name = groupNameInput.value.trim();
+
+            if (!groupId || !name) {
+                showToast('MISSING DATA', 'error');
+                return;
+            }
+
+            if (!validateGroupId(groupId)) {
+                showToast('INVALID GROUP ID', 'error');
+                groupIdInput.focus();
+                return;
+            }
+
+            if (!validateName(name)) {
+                showToast('INVALID NAME (2-50 CHARS)', 'error');
+                groupNameInput.focus();
+                return;
+            }
+
+            groupId = sanitizeInput(groupId);
+            name = sanitizeInput(name);
+
+            if (groups.some(g => g.groupId === groupId)) {
+                showToast('GROUP EXISTS', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/groups/add', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ groupId, name })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Failed to add group');
+                }
+
+                const data = await response.json();
+                groups.push(data.group);
+
+                groupIdInput.value = '';
+                groupNameInput.value = '';
+
+                renderGroups();
+                showToast('GROUP ADDED');
+            } catch (error) {
+                console.error('Failed to add group:', error);
+                showToast('FAILED TO ADD GROUP', 'error');
+            }
+        }
+
+        async function removeGroup(index) {
+            if (index < 0 || index >= groups.length) return;
+
+            const group = groups[index];
+
+            try {
+                const response = await fetch(`/api/groups/${group.groupId}`, {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to remove group');
+                }
+
+                groups.splice(index, 1);
+                renderGroups();
+                showToast('GROUP REMOVED');
+            } catch (error) {
+                console.error('Failed to remove group:', error);
+                showToast('FAILED TO REMOVE', 'error');
             }
         }
 

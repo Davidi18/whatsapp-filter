@@ -85,6 +85,7 @@ app.use(limiter);
 let config = {
   webhookUrl: process.env.WEBHOOK_URL, // Load from environment
   allowedNumbers: [],
+  allowedGroups: [],
   stats: {
     totalMessages: 0,
     filteredMessages: 0,
@@ -340,6 +341,7 @@ app.get('/docs', (req, res) => {
 app.get('/api/config', (req, res) => {
   res.json({
     contacts: config.allowedNumbers || [],
+    groups: config.allowedGroups || [],
     webhookUrl: config.webhookUrl || '',
     stats: config.stats,
     webhookFromEnv: true // Indicate webhook comes from environment
@@ -511,7 +513,7 @@ app.post('/api/test-webhook', async (req, res) => {
 
     await axios.post(config.webhookUrl, testMessage, {
       timeout: 5000,
-      headers: { 
+      headers: {
         'Content-Type': 'application/json',
         'X-Filter-Source': 'whatsapp-filter-test'
       }
@@ -519,10 +521,108 @@ app.post('/api/test-webhook', async (req, res) => {
 
     res.json({ success: true });
   } catch (error) {
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Webhook test failed',
-      details: error.message 
+      details: error.message
     });
+  }
+});
+
+// ============ GROUP ENDPOINTS ============
+
+// Add group
+app.post('/api/groups/add', async (req, res) => {
+  try {
+    const { groupId, name } = req.body;
+
+    if (!groupId || !name) {
+      return res.status(400).json({ error: 'Missing required fields: groupId, name' });
+    }
+
+    // Validate groupId format (numeric string, typically 18 digits)
+    const groupIdRegex = /^\d{10,25}$/;
+    if (!groupIdRegex.test(groupId)) {
+      return res.status(400).json({ error: 'Invalid group ID format' });
+    }
+
+    // Validate name
+    if (name.length < 2 || name.length > 50) {
+      return res.status(400).json({ error: 'Name must be 2-50 characters' });
+    }
+
+    // Initialize allowedGroups if not exists
+    if (!config.allowedGroups) {
+      config.allowedGroups = [];
+    }
+
+    // Check if group already exists
+    if (config.allowedGroups.some(g => g.groupId === groupId)) {
+      return res.status(409).json({ error: 'Group already exists' });
+    }
+
+    const newGroup = { groupId, name };
+    config.allowedGroups.push(newGroup);
+    await saveConfig();
+
+    res.json({ success: true, group: newGroup });
+  } catch (error) {
+    console.error('Failed to add group:', error);
+    res.status(500).json({ error: 'Failed to add group' });
+  }
+});
+
+// Delete group
+app.delete('/api/groups/:groupId', async (req, res) => {
+  try {
+    const groupId = req.params.groupId;
+
+    if (!config.allowedGroups) {
+      return res.status(404).json({ error: 'Group not found' });
+    }
+
+    const groupIndex = config.allowedGroups.findIndex(g => g.groupId === groupId);
+
+    if (groupIndex === -1) {
+      return res.status(404).json({ error: 'Group not found' });
+    }
+
+    const removedGroup = config.allowedGroups.splice(groupIndex, 1)[0];
+    await saveConfig();
+
+    res.json({ success: true, removed: removedGroup });
+  } catch (error) {
+    console.error('Failed to remove group:', error);
+    res.status(500).json({ error: 'Failed to remove group' });
+  }
+});
+
+// Update group
+app.put('/api/groups/:groupId', async (req, res) => {
+  try {
+    const groupId = req.params.groupId;
+    const { name } = req.body;
+
+    if (!config.allowedGroups) {
+      return res.status(404).json({ error: 'Group not found' });
+    }
+
+    const groupIndex = config.allowedGroups.findIndex(g => g.groupId === groupId);
+    if (groupIndex === -1) {
+      return res.status(404).json({ error: 'Group not found' });
+    }
+
+    if (name !== undefined) {
+      if (name.length < 2 || name.length > 50) {
+        return res.status(400).json({ error: 'Name must be 2-50 characters' });
+      }
+      config.allowedGroups[groupIndex].name = name;
+    }
+
+    await saveConfig();
+    res.json({ success: true, group: config.allowedGroups[groupIndex] });
+  } catch (error) {
+    console.error('Failed to update group:', error);
+    res.status(500).json({ error: 'Failed to update group' });
   }
 });
 
@@ -531,21 +631,38 @@ app.post('/filter', async (req, res) => {
   try {
     const message = req.body;
     config.stats.totalMessages++;
-    
-    // Extract phone number
+
+    // Extract phone number or group ID
     const remoteJid = message.key?.remoteJid || '';
-    const phoneNumber = remoteJid.replace('@s.whatsapp.net', '');
-    
-    // Skip groups and status updates
-    if (remoteJid.includes('@g.us') || remoteJid.includes('status@broadcast')) {
+
+    // Skip status updates
+    if (remoteJid.includes('status@broadcast')) {
       config.stats.filteredMessages++;
       return res.status(200).send('OK');
     }
 
-    // Check if number is allowed
-    const isAllowed = config.allowedNumbers.some(contact => 
-      contact.phone.replace(/[-\s]/g, '') === phoneNumber.replace(/[-\s]/g, '')
-    );
+    let isAllowed = false;
+    let sourceId = '';
+
+    // Check if it's a group message
+    if (remoteJid.includes('@g.us')) {
+      const groupId = remoteJid.replace('@g.us', '');
+      sourceId = groupId;
+
+      // Check if group is allowed
+      isAllowed = config.allowedGroups?.some(group =>
+        group.groupId === groupId
+      ) || false;
+    } else {
+      // It's a personal message
+      const phoneNumber = remoteJid.replace('@s.whatsapp.net', '');
+      sourceId = phoneNumber;
+
+      // Check if number is allowed
+      isAllowed = config.allowedNumbers.some(contact =>
+        contact.phone.replace(/[-\s]/g, '') === phoneNumber.replace(/[-\s]/g, '')
+      );
+    }
 
     if (isAllowed && config.webhookUrl) {
       // Forward to n8n
@@ -555,17 +672,18 @@ app.post('/filter', async (req, res) => {
           headers: {
             'Content-Type': 'application/json',
             'X-Filter-Source': 'whatsapp-filter',
-            'X-Original-Phone': phoneNumber
+            'X-Source-Id': sourceId,
+            'X-Source-Type': remoteJid.includes('@g.us') ? 'group' : 'contact'
           }
         });
         config.stats.allowedMessages++;
-        console.log(`✅ Message forwarded from ${phoneNumber}`);
+        console.log(`✅ Message forwarded from ${sourceId}`);
       } catch (error) {
-        console.error(`❌ Failed to forward message from ${phoneNumber}:`, error.message);
+        console.error(`❌ Failed to forward message from ${sourceId}:`, error.message);
       }
     } else {
       config.stats.filteredMessages++;
-      console.log(`🚫 Message filtered from ${phoneNumber}`);
+      console.log(`🚫 Message filtered from ${sourceId}`);
     }
 
     // Auto-save stats every 100 messages
