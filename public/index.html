@@ -4,10 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Filter Control</title>
-    
+
     <!-- Retro Terminal Favicon -->
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2300ff9f'><rect x='2' y='3' width='20' height='14' rx='2' stroke='%2300ff9f' stroke-width='2' fill='%230d1b2a'/><path d='M6 7h2v2H6zM6 10h8v1H6z' fill='%2300ff9f'/><circle cx='18' cy='8' r='1' fill='%2300ff9f'/></svg>" type="image/svg+xml">
-    
+
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap');
 
@@ -23,7 +23,7 @@
             color: #00ff9f;
             min-height: 100vh;
             padding: 20px;
-            background-image: 
+            background-image:
                 linear-gradient(90deg, rgba(0,255,159,0.1) 1px, transparent 1px),
                 linear-gradient(180deg, rgba(0,255,159,0.1) 1px, transparent 1px);
             background-size: 20px 20px;
@@ -31,12 +31,12 @@
         }
 
         .terminal {
-            max-width: 800px;
+            max-width: 900px;
             margin: 0 auto;
             background: #1a2332;
             border: 2px solid #00ff9f;
             border-radius: 8px;
-            box-shadow: 
+            box-shadow:
                 0 0 20px rgba(0,255,159,0.3),
                 inset 0 0 20px rgba(0,255,159,0.1);
         }
@@ -51,10 +51,86 @@
             letter-spacing: 2px;
             border-bottom: 2px solid #00ff9f;
             text-align: left;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .version-badge {
+            font-size: 12px;
+            background: #0d1b2a;
+            color: #00ff9f;
+            padding: 4px 10px;
+            border-radius: 4px;
         }
 
         .content {
             padding: 30px;
+        }
+
+        /* Connection Banner */
+        .connection-banner {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 12px 20px;
+            margin-bottom: 25px;
+            border-radius: 4px;
+            border: 1px solid;
+            font-size: 13px;
+        }
+
+        .connection-banner.status-connected {
+            background: rgba(0, 255, 159, 0.1);
+            border-color: #00ff9f;
+        }
+
+        .connection-banner.status-disconnected {
+            background: rgba(255, 71, 87, 0.1);
+            border-color: #ff4757;
+        }
+
+        .connection-banner.status-connecting {
+            background: rgba(255, 165, 0, 0.1);
+            border-color: #ffa500;
+        }
+
+        .connection-banner.status-unknown {
+            background: rgba(128, 128, 128, 0.1);
+            border-color: #808080;
+        }
+
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        .status-connected .status-dot { background: #00ff9f; }
+        .status-disconnected .status-dot { background: #ff4757; }
+        .status-connecting .status-dot { background: #ffa500; }
+        .status-unknown .status-dot { background: #808080; }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .status-text {
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .status-phone {
+            font-family: monospace;
+            opacity: 0.8;
+        }
+
+        .status-since {
+            margin-left: auto;
+            opacity: 0.6;
+            font-size: 11px;
         }
 
         .status-bar {
@@ -74,21 +150,21 @@
 
         .stats {
             display: grid;
-            grid-template-columns: 1fr 1fr 1fr;
-            gap: 20px;
-            margin-bottom: 40px;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 15px;
+            margin-bottom: 30px;
         }
 
         .stat-box {
             background: rgba(0,255,159,0.05);
             border: 1px solid #00ff9f;
-            padding: 20px;
+            padding: 18px 15px;
             text-align: center;
             border-radius: 4px;
         }
 
         .stat-number {
-            font-size: 36px;
+            font-size: 28px;
             font-weight: 900;
             color: #00ff9f;
             text-shadow: 0 0 10px rgba(0,255,159,0.5);
@@ -96,14 +172,14 @@
         }
 
         .stat-label {
-            font-size: 12px;
+            font-size: 10px;
             text-transform: uppercase;
             letter-spacing: 1px;
             opacity: 0.8;
         }
 
         .section {
-            margin-bottom: 40px;
+            margin-bottom: 30px;
             border: 1px solid #00ff9f;
             border-radius: 4px;
             background: rgba(0,255,159,0.02);
@@ -118,6 +194,9 @@
             font-size: 14px;
             border-bottom: 1px solid #00ff9f;
             text-align: left;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
 
         .section-content {
@@ -200,6 +279,12 @@
             transform: scale(0.98);
         }
 
+        .btn-small {
+            padding: 6px 12px;
+            font-size: 11px;
+            min-width: auto;
+        }
+
         .contact-list {
             display: flex;
             flex-direction: column;
@@ -275,6 +360,76 @@
             margin-bottom: 15px;
         }
 
+        /* Events Log */
+        .events-log {
+            max-height: 250px;
+            overflow-y: auto;
+        }
+
+        .event-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 15px;
+            border-bottom: 1px solid rgba(0,255,159,0.1);
+            font-size: 12px;
+        }
+
+        .event-item:last-child {
+            border-bottom: none;
+        }
+
+        .event-time {
+            font-family: monospace;
+            opacity: 0.6;
+            min-width: 60px;
+        }
+
+        .event-icon {
+            font-size: 14px;
+        }
+
+        .event-icon.forwarded { color: #00ff9f; }
+        .event-icon.filtered { color: #808080; }
+        .event-icon.failed { color: #ff4757; }
+
+        .event-type {
+            font-weight: 700;
+            min-width: 140px;
+        }
+
+        .event-source {
+            font-family: monospace;
+            opacity: 0.8;
+        }
+
+        /* Event Stats Bars */
+        .event-stats-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+        }
+
+        .event-stat-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 12px;
+            background: rgba(0,255,159,0.03);
+            border: 1px solid rgba(0,255,159,0.2);
+            border-radius: 4px;
+            font-size: 11px;
+        }
+
+        .event-stat-name {
+            font-weight: 700;
+        }
+
+        .event-stat-count {
+            font-family: monospace;
+            color: #00ff9f;
+        }
+
         .toast {
             position: fixed;
             top: 20px;
@@ -312,29 +467,47 @@
             51%, 100% { opacity: 0.3; }
         }
 
+        /* Collapsible sections */
+        .section.collapsed .section-content {
+            display: none;
+        }
+
+        .section-toggle {
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .toggle-icon {
+            transition: transform 0.2s;
+        }
+
+        .section.collapsed .toggle-icon {
+            transform: rotate(-90deg);
+        }
+
         @media (max-width: 768px) {
             .terminal {
                 margin: 10px;
             }
-            
+
             .content {
                 padding: 20px;
             }
-            
+
             .status-bar {
                 flex-direction: column;
                 gap: 10px;
             }
-            
+
             .status-item {
                 text-align: center;
             }
-            
+
             .stats {
-                grid-template-columns: 1fr;
-                gap: 15px;
+                grid-template-columns: repeat(2, 1fr);
+                gap: 10px;
             }
-            
+
             .add-form {
                 grid-template-columns: 1fr;
                 gap: 12px;
@@ -344,32 +517,42 @@
                 margin-top: 5px;
             }
 
-            .add-form .input-group:last-child .input-label {
-                display: none;
-            }
-            
             .contact-item {
                 grid-template-columns: 1fr;
                 gap: 10px;
                 text-align: left;
                 padding: 20px;
             }
-            
+
             .contact-item > div {
                 padding: 5px 0;
                 border-bottom: 1px solid rgba(0,255,159,0.2);
             }
-            
+
             .contact-item > div:last-child {
                 border-bottom: none;
                 text-align: center;
                 padding-top: 15px;
             }
-            
+
             .remove-btn {
                 width: 100%;
                 height: 45px;
                 margin-top: 10px;
+            }
+
+            .connection-banner {
+                flex-wrap: wrap;
+            }
+
+            .status-since {
+                width: 100%;
+                margin-left: 0;
+                margin-top: 5px;
+            }
+
+            .event-stats-grid {
+                grid-template-columns: 1fr;
             }
         }
 
@@ -377,24 +560,30 @@
             .header {
                 font-size: 14px;
                 padding: 12px 20px;
+                flex-direction: column;
+                gap: 8px;
             }
-            
+
             .content {
                 padding: 15px;
             }
-            
+
             .stat-number {
-                font-size: 28px;
+                font-size: 24px;
             }
-            
+
             .input-field {
                 padding: 15px 12px;
                 font-size: 16px;
             }
-            
+
             .btn {
                 padding: 15px;
                 font-size: 14px;
+            }
+
+            .stats {
+                grid-template-columns: 1fr 1fr;
             }
         }
     </style>
@@ -402,10 +591,19 @@
 <body>
     <div class="terminal">
         <div class="header">
-            &gt; FILTER CONTROL SYSTEM v2.1
+            <span>&gt; FILTER CONTROL SYSTEM</span>
+            <span class="version-badge">v2.0</span>
         </div>
-        
+
         <div class="content">
+            <!-- Connection Banner -->
+            <div class="connection-banner status-unknown" id="connectionBanner">
+                <span class="status-dot"></span>
+                <span class="status-text" id="connStatus">CHECKING...</span>
+                <span class="status-phone" id="connPhone"></span>
+                <span class="status-since" id="connSince"></span>
+            </div>
+
             <div class="status-bar">
                 <div class="status-item">
                     STATUS: <span class="blink" id="systemStatus">LOADING</span>
@@ -420,6 +618,14 @@
 
             <div class="stats">
                 <div class="stat-box">
+                    <div class="stat-number" id="messagesForwarded">-</div>
+                    <div class="stat-label">FORWARDED</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-number" id="messagesFiltered">-</div>
+                    <div class="stat-label">FILTERED</div>
+                </div>
+                <div class="stat-box">
                     <div class="stat-number" id="totalContacts">-</div>
                     <div class="stat-label">CONTACTS</div>
                 </div>
@@ -427,9 +633,32 @@
                     <div class="stat-number" id="totalGroups">-</div>
                     <div class="stat-label">GROUPS</div>
                 </div>
-                <div class="stat-box">
-                    <div class="stat-number" id="todayMessages">-</div>
-                    <div class="stat-label">MESSAGES</div>
+            </div>
+
+            <!-- Recent Events -->
+            <div class="section">
+                <div class="section-header section-toggle" onclick="toggleSection(this)">
+                    <span><span class="toggle-icon">▼</span> RECENT EVENTS</span>
+                    <button class="btn btn-small" onclick="event.stopPropagation(); refreshEvents()">REFRESH</button>
+                </div>
+                <div class="section-content">
+                    <div class="events-log" id="eventsList">
+                        <div class="empty-state">
+                            <div>NO EVENTS YET</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Event Statistics -->
+            <div class="section collapsed">
+                <div class="section-header section-toggle" onclick="toggleSection(this)">
+                    <span><span class="toggle-icon">▼</span> EVENT STATISTICS</span>
+                </div>
+                <div class="section-content">
+                    <div class="event-stats-grid" id="eventStatsGrid">
+                        <!-- Populated by JS -->
+                    </div>
                 </div>
             </div>
 
@@ -448,9 +677,9 @@
                         </div>
                         <div class="input-group">
                             <div class="input-label">CONTACT NAME</div>
-                            <input 
-                                type="text" 
-                                class="input-field" 
+                            <input
+                                type="text"
+                                class="input-field"
                                 placeholder="CLIENT NAME"
                                 id="nameInput"
                             >
@@ -473,7 +702,9 @@
             </div>
 
             <div class="section">
-                <div class="section-header">AUTHORIZED CONTACTS</div>
+                <div class="section-header section-toggle" onclick="toggleSection(this)">
+                    <span><span class="toggle-icon">▼</span> AUTHORIZED CONTACTS</span>
+                </div>
                 <div class="section-content">
                     <div id="contactsList" class="contact-list">
                         <div class="empty-state">
@@ -515,7 +746,9 @@
             </div>
 
             <div class="section">
-                <div class="section-header">AUTHORIZED GROUPS</div>
+                <div class="section-header section-toggle" onclick="toggleSection(this)">
+                    <span><span class="toggle-icon">▼</span> AUTHORIZED GROUPS</span>
+                </div>
                 <div class="section-content">
                     <div id="groupsList" class="contact-list">
                         <div class="empty-state">
@@ -531,10 +764,14 @@
     <div class="toast" id="toast"></div>
 
     <script>
-        // START COMPLETELY EMPTY - NO DEMO DATA
         let contacts = [];
         let groups = [];
         let stats = { totalMessages: 0, filteredMessages: 0, allowedMessages: 0 };
+
+        // Toggle section collapse
+        function toggleSection(header) {
+            header.closest('.section').classList.toggle('collapsed');
+        }
 
         // Load data from server
         async function loadConfig() {
@@ -548,7 +785,6 @@
 
                     renderContacts();
                     renderGroups();
-                    updateStats();
 
                     document.getElementById('systemStatus').textContent = 'ONLINE';
 
@@ -568,22 +804,123 @@
             }
         }
 
-        // Load system info
+        // Load system info and stats
         async function loadSystemInfo() {
             try {
                 const response = await fetch('/health');
                 if (response.ok) {
                     const data = await response.json();
-                    
+
                     const hours = Math.floor(data.uptime / 3600);
                     const minutes = Math.floor((data.uptime % 3600) / 60);
                     const seconds = Math.floor(data.uptime % 60);
-                    document.getElementById('uptime').textContent = 
+                    document.getElementById('uptime').textContent =
                         `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+
+                    // Update stats
+                    document.getElementById('messagesForwarded').textContent = data.stats?.messagesForwarded || 0;
+                    document.getElementById('messagesFiltered').textContent = data.stats?.messagesFiltered || 0;
+                    document.getElementById('totalContacts').textContent = data.stats?.totalContacts || contacts.length;
+                    document.getElementById('totalGroups').textContent = data.stats?.totalGroups || groups.length;
+
+                    // Update connection status
+                    updateConnectionBanner(data.connection);
                 }
             } catch (error) {
                 document.getElementById('uptime').textContent = '--:--:--';
             }
+        }
+
+        // Update connection banner
+        function updateConnectionBanner(conn) {
+            if (!conn) return;
+
+            const banner = document.getElementById('connectionBanner');
+            const status = conn.status || 'unknown';
+
+            banner.className = `connection-banner status-${status}`;
+            document.getElementById('connStatus').textContent = status.toUpperCase();
+            document.getElementById('connPhone').textContent = conn.phone ? `+${conn.phone}` : '';
+
+            if (conn.statusSince) {
+                const since = new Date(conn.statusSince);
+                document.getElementById('connSince').textContent = `Since: ${since.toLocaleString()}`;
+            }
+        }
+
+        // Load recent events
+        async function loadRecentEvents() {
+            try {
+                const response = await fetch('/api/events/recent?limit=15');
+                if (response.ok) {
+                    const data = await response.json();
+                    renderEvents(data.events || []);
+                }
+            } catch (error) {
+                console.error('Failed to load events:', error);
+            }
+        }
+
+        // Render events
+        function renderEvents(events) {
+            const list = document.getElementById('eventsList');
+
+            if (!events || events.length === 0) {
+                list.innerHTML = `<div class="empty-state"><div>NO EVENTS YET</div></div>`;
+                return;
+            }
+
+            list.innerHTML = events.map(e => {
+                const time = new Date(e.timestamp);
+                const timeStr = time.toLocaleTimeString('en-US', { hour12: false });
+                const icon = e.action === 'forwarded' ? '✓' : (e.action === 'failed' ? '✗' : '○');
+
+                return `
+                    <div class="event-item">
+                        <span class="event-time">${timeStr}</span>
+                        <span class="event-icon ${e.action}">${icon}</span>
+                        <span class="event-type">${e.event}</span>
+                        <span class="event-source">${e.source || '-'}</span>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Refresh events
+        async function refreshEvents() {
+            await loadRecentEvents();
+            showToast('EVENTS REFRESHED');
+        }
+
+        // Load event statistics
+        async function loadEventStats() {
+            try {
+                const response = await fetch('/api/stats');
+                if (response.ok) {
+                    const data = await response.json();
+                    renderEventStats(data.events || {});
+                }
+            } catch (error) {
+                console.error('Failed to load stats:', error);
+            }
+        }
+
+        // Render event stats
+        function renderEventStats(events) {
+            const grid = document.getElementById('eventStatsGrid');
+            const eventTypes = Object.keys(events).filter(e => events[e].total > 0);
+
+            if (eventTypes.length === 0) {
+                grid.innerHTML = `<div class="empty-state"><div>NO STATISTICS YET</div></div>`;
+                return;
+            }
+
+            grid.innerHTML = eventTypes.map(event => `
+                <div class="event-stat-item">
+                    <span class="event-stat-name">${event}</span>
+                    <span class="event-stat-count">${events[event].total}</span>
+                </div>
+            `).join('');
         }
 
         // Save contacts to server
@@ -606,14 +943,7 @@
             }
         }
 
-        function updateStats() {
-            document.getElementById('totalContacts').textContent = contacts.length;
-            document.getElementById('totalGroups').textContent = groups.length;
-            document.getElementById('todayMessages').textContent = stats.allowedMessages || 0;
-        }
-
         function validatePhone(phone) {
-            // Accept: pure digits (10-15 chars) OR Israeli formatted (972-XX-XXX-XXXX)
             const phoneRegex = /^(\d{10,15}|972[-\s]?[1-9]\d{1}[-\s]?\d{3}[-\s]?\d{4})$/;
             const cleaned = phone.replace(/[-\s]/g, '');
             return phoneRegex.test(phone) && cleaned.length >= 10 && cleaned.length <= 15;
@@ -631,7 +961,7 @@
 
         function renderContacts() {
             const list = document.getElementById('contactsList');
-            
+
             if (contacts.length === 0) {
                 list.innerHTML = `
                     <div class="empty-state">
@@ -639,7 +969,6 @@
                         <div>NO CONTACTS FOUND</div>
                     </div>
                 `;
-                updateStats();
                 return;
             }
 
@@ -651,15 +980,13 @@
                     <button class="remove-btn" onclick="removeContact(${index})">×</button>
                 </div>
             `).join('');
-
-            updateStats();
         }
 
         async function addContact() {
             const phoneInput = document.getElementById('phoneInput');
             const nameInput = document.getElementById('nameInput');
             const typeInput = document.getElementById('typeInput');
-            
+
             let phone = phoneInput.value.trim();
             let name = nameInput.value.trim();
             const type = typeInput.value;
@@ -691,15 +1018,16 @@
 
             const newContact = { phone, name, type };
             contacts.push(newContact);
-            
+
             try {
                 await saveContacts();
-                
+
                 phoneInput.value = '';
                 nameInput.value = '';
                 typeInput.value = 'PERSONAL';
-                
+
                 renderContacts();
+                loadSystemInfo();
                 showToast('CONTACT ADDED');
             } catch (error) {
                 contacts.pop();
@@ -715,6 +1043,7 @@
             try {
                 await saveContacts();
                 renderContacts();
+                loadSystemInfo();
                 showToast('CONTACT REMOVED');
             } catch (error) {
                 contacts.splice(index, 0, removedContact);
@@ -725,7 +1054,6 @@
         // ============ GROUP FUNCTIONS ============
 
         function validateGroupId(groupId) {
-            // Remove @g.us suffix if present
             const cleanId = groupId.replace('@g.us', '');
             const groupIdRegex = /^\d{10,25}$/;
             return groupIdRegex.test(cleanId);
@@ -741,7 +1069,6 @@
                         <div>NO GROUPS FOUND</div>
                     </div>
                 `;
-                updateStats();
                 return;
             }
 
@@ -752,8 +1079,6 @@
                     <button class="remove-btn" onclick="removeGroup(${index})">×</button>
                 </div>
             `).join('');
-
-            updateStats();
         }
 
         async function addGroup() {
@@ -807,6 +1132,7 @@
                 groupNameInput.value = '';
 
                 renderGroups();
+                loadSystemInfo();
                 showToast('GROUP ADDED');
             } catch (error) {
                 console.error('Failed to add group:', error);
@@ -830,6 +1156,7 @@
 
                 groups.splice(index, 1);
                 renderGroups();
+                loadSystemInfo();
                 showToast('GROUP REMOVED');
             } catch (error) {
                 console.error('Failed to remove group:', error);
@@ -842,7 +1169,7 @@
             toast.textContent = message;
             toast.className = `toast ${type === 'error' ? 'error' : ''}`;
             toast.classList.add('show');
-            
+
             setTimeout(() => {
                 toast.classList.remove('show');
             }, 2000);
@@ -867,15 +1194,23 @@
             }
         });
 
-        // Auto-refresh data every 30 seconds
+        // Auto-refresh data every 5 seconds
+        setInterval(() => {
+            loadSystemInfo();
+            loadRecentEvents();
+        }, 5000);
+
+        // Refresh stats every 30 seconds
         setInterval(() => {
             loadConfig();
-            loadSystemInfo();
+            loadEventStats();
         }, 30000);
 
         // Initial load
         loadConfig();
         loadSystemInfo();
+        loadRecentEvents();
+        loadEventStats();
     </script>
 </body>
 </html>
