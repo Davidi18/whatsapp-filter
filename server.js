@@ -530,14 +530,22 @@ app.post('/api/test-webhook', async (req, res) => {
 
 // ============ GROUP ENDPOINTS ============
 
+// Get all groups
+app.get('/api/groups', (req, res) => {
+  res.json({ groups: config.allowedGroups || [] });
+});
+
 // Add group
 app.post('/api/groups/add', async (req, res) => {
   try {
-    const { groupId, name } = req.body;
+    let { groupId, name } = req.body;
 
     if (!groupId || !name) {
       return res.status(400).json({ error: 'Missing required fields: groupId, name' });
     }
+
+    // Remove @g.us suffix if present
+    groupId = groupId.replace('@g.us', '');
 
     // Validate groupId format (numeric string, typically 18 digits)
     const groupIdRegex = /^\d{10,25}$/;
@@ -564,7 +572,7 @@ app.post('/api/groups/add', async (req, res) => {
     config.allowedGroups.push(newGroup);
     await saveConfig();
 
-    res.json({ success: true, group: newGroup });
+    res.json({ success: true, group: newGroup, message: 'Group added' });
   } catch (error) {
     console.error('Failed to add group:', error);
     res.status(500).json({ error: 'Failed to add group' });
@@ -574,7 +582,8 @@ app.post('/api/groups/add', async (req, res) => {
 // Delete group
 app.delete('/api/groups/:groupId', async (req, res) => {
   try {
-    const groupId = req.params.groupId;
+    // Remove @g.us suffix if present
+    const groupId = req.params.groupId.replace('@g.us', '');
 
     if (!config.allowedGroups) {
       return res.status(404).json({ error: 'Group not found' });
@@ -589,7 +598,7 @@ app.delete('/api/groups/:groupId', async (req, res) => {
     const removedGroup = config.allowedGroups.splice(groupIndex, 1)[0];
     await saveConfig();
 
-    res.json({ success: true, removed: removedGroup });
+    res.json({ success: true, removed: removedGroup, message: 'Group removed' });
   } catch (error) {
     console.error('Failed to remove group:', error);
     res.status(500).json({ error: 'Failed to remove group' });
