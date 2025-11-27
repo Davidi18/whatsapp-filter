@@ -422,10 +422,10 @@
                     <div class="add-form">
                         <div class="input-group">
                             <div class="input-label">PHONE NUMBER</div>
-                            <input 
-                                type="tel" 
-                                class="input-field" 
-                                placeholder="972-50-123-4567"
+                            <input
+                                type="tel"
+                                class="input-field"
+                                placeholder="972547554964"
                                 id="phoneInput"
                             >
                         </div>
@@ -547,9 +547,10 @@
         }
 
         function validatePhone(phone) {
-            const phoneRegex = /^972[-\s]?[1-9]\d{1}[-\s]?\d{3}[-\s]?\d{4}$/;
+            // Accept: pure digits (10-15 chars) OR Israeli formatted (972-XX-XXX-XXXX)
+            const phoneRegex = /^(\d{10,15}|972[-\s]?[1-9]\d{1}[-\s]?\d{3}[-\s]?\d{4})$/;
             const cleaned = phone.replace(/[-\s]/g, '');
-            return phoneRegex.test(phone) && cleaned.length >= 12 && cleaned.length <= 13;
+            return phoneRegex.test(phone) && cleaned.length >= 10 && cleaned.length <= 15;
         }
 
         function validateName(name) {
