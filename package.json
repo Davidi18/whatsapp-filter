@@ -1,7 +1,7 @@
 {
   "name": "whatsapp-filter",
-  "version": "1.0.0",
-  "description": "WhatsApp message filter with retro UI",
+  "version": "2.0.0",
+  "description": "WhatsApp message filter with multi-event support, alerts, and retro UI",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -18,7 +18,7 @@
     "node": ">=18.0.0",
     "npm": ">=8.0.0"
   },
-  "keywords": ["whatsapp", "filter", "webhook", "n8n"],
+  "keywords": ["whatsapp", "filter", "webhook", "n8n", "evolution-api", "alerts"],
   "author": "Your Name",
   "license": "MIT"
 }
