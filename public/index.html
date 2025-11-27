@@ -126,9 +126,14 @@
 
         .add-form {
             display: grid;
-            grid-template-columns: 1.2fr 1.2fr 0.8fr 100px;
+            grid-template-columns: 1.2fr 1.2fr 0.8fr auto;
             gap: 15px;
             align-items: end;
+        }
+
+        .add-form .btn {
+            width: 100%;
+            padding: 12px 20px;
         }
 
         .input-group {
@@ -332,7 +337,15 @@
             
             .add-form {
                 grid-template-columns: 1fr;
-                gap: 15px;
+                gap: 12px;
+            }
+
+            .add-form .btn {
+                margin-top: 5px;
+            }
+
+            .add-form .input-group:last-child .input-label {
+                display: none;
             }
             
             .contact-item {
@@ -422,10 +435,10 @@
                     <div class="add-form">
                         <div class="input-group">
                             <div class="input-label">PHONE NUMBER</div>
-                            <input 
-                                type="tel" 
-                                class="input-field" 
-                                placeholder="972-50-123-4567"
+                            <input
+                                type="tel"
+                                class="input-field"
+                                placeholder="972547554964"
                                 id="phoneInput"
                             >
                         </div>
@@ -447,7 +460,10 @@
                                 <option value="TEMP">TEMP</option>
                             </select>
                         </div>
-                        <button class="btn" onclick="addContact()">ADD</button>
+                        <div class="input-group">
+                            <div class="input-label">&nbsp;</div>
+                            <button class="btn" onclick="addContact()">ADD</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -547,9 +563,10 @@
         }
 
         function validatePhone(phone) {
-            const phoneRegex = /^972[-\s]?[1-9]\d{1}[-\s]?\d{3}[-\s]?\d{4}$/;
+            // Accept: pure digits (10-15 chars) OR Israeli formatted (972-XX-XXX-XXXX)
+            const phoneRegex = /^(\d{10,15}|972[-\s]?[1-9]\d{1}[-\s]?\d{3}[-\s]?\d{4})$/;
             const cleaned = phone.replace(/[-\s]/g, '');
-            return phoneRegex.test(phone) && cleaned.length >= 12 && cleaned.length <= 13;
+            return phoneRegex.test(phone) && cleaned.length >= 10 && cleaned.length <= 15;
         }
 
         function validateName(name) {

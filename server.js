@@ -201,7 +201,7 @@ app.get('/docs', (req, res) => {
         body: {
           contacts: [
             {
-              phone: "972-XX-XXX-XXXX",
+              phone: "972547554964",
               name: "Contact Name",
               type: "PERSONAL|BUSINESS|VIP|TEMP"
             }
@@ -213,7 +213,7 @@ app.get('/docs', (req, res) => {
         description: "Add single contact",
         auth_required: true,
         body: {
-          phone: "972-XX-XXX-XXXX (required)",
+          phone: "972547554964 (required, 10-15 digits)",
           name: "Contact Name (required, 2-50 chars)",
           type: "PERSONAL|BUSINESS|VIP|TEMP (required)"
         },
@@ -325,7 +325,7 @@ app.get('/docs', (req, res) => {
       VIP: "VIP contacts (priority handling)",
       TEMP: "Temporary contacts (short-term access)"
     },
-    phone_format: "Israeli format: 972-XX-XXX-XXXX or 972XXXXXXXXX",
+    phone_format: "Country code + number: 972547554964 or formatted 972-XX-XXX-XXXX (10-15 digits)",
     notes: [
       "All /api/* endpoints require Basic Authentication",
       "Phone numbers are stored without formatting but validated on input", 
@@ -381,9 +381,10 @@ app.post('/api/contacts/add', async (req, res) => {
     }
 
     // Validate phone format
-    const phoneRegex = /^972[-\s]?[1-9]\d{1}[-\s]?\d{3}[-\s]?\d{4}$/;
+    // Accept: pure digits (10-15 chars) OR Israeli formatted (972-XX-XXX-XXXX)
+    const phoneRegex = /^(\d{10,15}|972[-\s]?[1-9]\d{1}[-\s]?\d{3}[-\s]?\d{4})$/;
     if (!phoneRegex.test(phone)) {
-      return res.status(400).json({ error: 'Invalid phone format' });
+      return res.status(400).json({ error: 'Invalid phone format. Use country code + number (e.g., 972547554964)' });
     }
 
     // Validate name
