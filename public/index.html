@@ -493,7 +493,7 @@
                             <input
                                 type="text"
                                 class="input-field"
-                                placeholder="120363012345678901"
+                                placeholder="120363123456789012@g.us"
                                 id="groupIdInput"
                             >
                         </div>
@@ -725,8 +725,10 @@
         // ============ GROUP FUNCTIONS ============
 
         function validateGroupId(groupId) {
+            // Remove @g.us suffix if present
+            const cleanId = groupId.replace('@g.us', '');
             const groupIdRegex = /^\d{10,25}$/;
-            return groupIdRegex.test(groupId);
+            return groupIdRegex.test(cleanId);
         }
 
         function renderGroups() {
