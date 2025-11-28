@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  whatsapp-filter:
+    build: .
+    container_name: whatsapp-filter
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/app/config  # Persistent storage for contacts and stats
+    environment:
+      - PORT=3000
+      - WEBHOOK_URL=${WEBHOOK_URL}
+      - ADMIN_USERNAME=${ADMIN_USERNAME}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - ALERTS_WEBHOOK_URL=${ALERTS_WEBHOOK_URL:-}
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-}
+      - INSTANCE_NAME=${INSTANCE_NAME:-main}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - NODE_ENV=production
