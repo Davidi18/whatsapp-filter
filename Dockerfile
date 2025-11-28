@@ -12,8 +12,10 @@ RUN npm install --production
 COPY . .
 
 # Create config directory
-RUN mkdir -p config && \
-    echo '{"allowedNumbers":[],"stats":{"totalMessages":0,"filteredMessages":0,"allowedMessages":0}}' > config/contacts.json
+RUN mkdir -p config
+
+# Declare volume for persistent data
+VOLUME ["/app/config"]
 
 # Expose port
 EXPOSE 3000
