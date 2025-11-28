@@ -390,8 +390,68 @@
         }
 
         .event-icon.forwarded { color: #00ff9f; }
-        .event-icon.filtered { color: #808080; }
+        .event-icon.filtered { color: #ffa500; }
         .event-icon.failed { color: #ff4757; }
+
+        .event-action {
+            font-size: 10px;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-weight: 700;
+            min-width: 70px;
+            text-align: center;
+        }
+
+        .event-action.forwarded {
+            background: rgba(0, 255, 159, 0.2);
+            color: #00ff9f;
+            border: 1px solid #00ff9f;
+        }
+
+        .event-action.filtered {
+            background: rgba(255, 165, 0, 0.2);
+            color: #ffa500;
+            border: 1px solid #ffa500;
+        }
+
+        .event-action.failed {
+            background: rgba(255, 71, 87, 0.2);
+            color: #ff4757;
+            border: 1px solid #ff4757;
+        }
+
+        .event-action.logged {
+            background: rgba(128, 128, 128, 0.2);
+            color: #808080;
+            border: 1px solid #808080;
+        }
+
+        .filter-tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .filter-tab {
+            padding: 6px 14px;
+            border: 1px solid #00ff9f;
+            background: transparent;
+            color: #00ff9f;
+            font-family: 'Orbitron', monospace;
+            font-size: 11px;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+
+        .filter-tab:hover {
+            background: rgba(0, 255, 159, 0.1);
+        }
+
+        .filter-tab.active {
+            background: #00ff9f;
+            color: #0d1b2a;
+        }
 
         .event-type {
             font-weight: 700;
@@ -642,6 +702,11 @@
                     <button class="btn btn-small" onclick="event.stopPropagation(); refreshEvents()">REFRESH</button>
                 </div>
                 <div class="section-content">
+                    <div class="filter-tabs">
+                        <button class="filter-tab active" onclick="filterEvents('all')">ALL</button>
+                        <button class="filter-tab" onclick="filterEvents('forwarded')">FORWARDED</button>
+                        <button class="filter-tab" onclick="filterEvents('filtered')">FILTERED</button>
+                    </div>
                     <div class="events-log" id="eventsList">
                         <div class="empty-state">
                             <div>NO EVENTS YET</div>
@@ -839,26 +904,59 @@
             const status = conn.status || 'unknown';
 
             banner.className = `connection-banner status-${status}`;
-            document.getElementById('connStatus').textContent = status.toUpperCase();
-            document.getElementById('connPhone').textContent = conn.phone ? `+${conn.phone}` : '';
 
-            if (conn.statusSince) {
-                const since = new Date(conn.statusSince);
-                document.getElementById('connSince').textContent = `Since: ${since.toLocaleString()}`;
+            // Show friendly text for unknown status
+            if (status === 'unknown') {
+                document.getElementById('connStatus').textContent = 'AWAITING STATUS';
+                document.getElementById('connSince').textContent = 'Waiting for Evolution API...';
+            } else {
+                document.getElementById('connStatus').textContent = status.toUpperCase();
+                if (conn.statusSince) {
+                    const since = new Date(conn.statusSince);
+                    document.getElementById('connSince').textContent = `Since: ${since.toLocaleString()}`;
+                }
             }
+
+            document.getElementById('connPhone').textContent = conn.phone ? `+${conn.phone}` : '';
         }
+
+        // Store all events for filtering
+        let allEvents = [];
+        let currentFilter = 'all';
 
         // Load recent events
         async function loadRecentEvents() {
             try {
-                const response = await fetch('/api/events/recent?limit=15');
+                const response = await fetch('/api/events/recent?limit=50');
                 if (response.ok) {
                     const data = await response.json();
-                    renderEvents(data.events || []);
+                    allEvents = data.events || [];
+                    renderEvents(filterEventsByAction(allEvents, currentFilter));
                 }
             } catch (error) {
                 console.error('Failed to load events:', error);
             }
+        }
+
+        // Filter events by action
+        function filterEventsByAction(events, filter) {
+            if (filter === 'all') return events;
+            return events.filter(e => e.action === filter);
+        }
+
+        // Filter events (called from tabs)
+        function filterEvents(filter) {
+            currentFilter = filter;
+
+            // Update active tab
+            document.querySelectorAll('.filter-tab').forEach(tab => {
+                tab.classList.remove('active');
+                if (tab.textContent.toLowerCase() === filter) {
+                    tab.classList.add('active');
+                }
+            });
+
+            renderEvents(filterEventsByAction(allEvents, filter));
         }
 
         // Render events
@@ -866,19 +964,20 @@
             const list = document.getElementById('eventsList');
 
             if (!events || events.length === 0) {
-                list.innerHTML = `<div class="empty-state"><div>NO EVENTS YET</div></div>`;
+                const msg = currentFilter === 'all' ? 'NO EVENTS YET' : `NO ${currentFilter.toUpperCase()} EVENTS`;
+                list.innerHTML = `<div class="empty-state"><div>${msg}</div></div>`;
                 return;
             }
 
             list.innerHTML = events.map(e => {
                 const time = new Date(e.timestamp);
                 const timeStr = time.toLocaleTimeString('en-US', { hour12: false });
-                const icon = e.action === 'forwarded' ? '✓' : (e.action === 'failed' ? '✗' : '○');
+                const actionText = (e.action || 'logged').toUpperCase();
 
                 return `
                     <div class="event-item">
                         <span class="event-time">${timeStr}</span>
-                        <span class="event-icon ${e.action}">${icon}</span>
+                        <span class="event-action ${e.action || 'logged'}">${actionText}</span>
                         <span class="event-type">${e.event}</span>
                         <span class="event-source">${e.source || '-'}</span>
                     </div>
