@@ -281,7 +281,8 @@ app.get('/docs', (req, res) => {
 // Main filter endpoint with event type
 app.post('/filter/:event', async (req, res) => {
   try {
-    const event = req.params.event.toUpperCase();
+    // Normalize event name: messages-upsert -> MESSAGES_UPSERT
+    const event = req.params.event.toUpperCase().replace(/-/g, '_');
     const payload = req.body;
 
     await eventRouter.routeEvent(event, payload, req);
