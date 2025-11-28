@@ -49,8 +49,9 @@ function checkAllowed(remoteJid) {
 async function handleUpsert(payload, context) {
   statsService.increment('MESSAGES_UPSERT', 'total');
 
-  // Extract sender info
-  const remoteJid = payload.key?.remoteJid || '';
+  // Extract sender info - Evolution API wraps data in 'data' field
+  const data = payload.data || payload;
+  const remoteJid = data.key?.remoteJid || '';
   const { isAllowed, sourceId, sourceType, reason } = checkAllowed(remoteJid);
 
   // Skip status broadcasts silently
@@ -87,7 +88,7 @@ async function handleUpsert(payload, context) {
       sourceType,
       action: 'forwarded',
       details: {
-        messageType: payload.message?.conversation ? 'text' : 'media'
+        messageType: data.message?.conversation ? 'text' : 'media'
       }
     });
     logger.filter(sourceId, true, sourceType);

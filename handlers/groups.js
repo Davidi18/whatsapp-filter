@@ -12,8 +12,11 @@ const logger = require('../utils/logger');
 async function handleUpsert(payload, context) {
   statsService.increment('GROUPS_UPSERT', 'total');
 
-  const groupId = payload.id || payload.jid;
-  const groupName = payload.subject || payload.name;
+  // Evolution API wraps data in 'data' field
+  const data = payload.data || payload;
+
+  const groupId = data.id || data.jid;
+  const groupName = data.subject || data.name;
 
   logger.debug('Group upsert', { groupId, groupName });
 
@@ -35,7 +38,10 @@ async function handleUpsert(payload, context) {
 async function handleUpdate(payload, context) {
   statsService.increment('GROUP_UPDATE', 'total');
 
-  const groupId = payload.id || payload.jid;
+  // Evolution API wraps data in 'data' field
+  const data = payload.data || payload;
+
+  const groupId = data.id || data.jid;
 
   logger.debug('Group update', { groupId });
 
@@ -56,9 +62,12 @@ async function handleUpdate(payload, context) {
 async function handleParticipants(payload, context) {
   statsService.increment('GROUP_PARTICIPANTS_UPDATE', 'total');
 
-  const groupId = payload.id || payload.jid;
-  const action = payload.action; // add, remove, promote, demote
-  const participants = payload.participants || [];
+  // Evolution API wraps data in 'data' field
+  const data = payload.data || payload;
+
+  const groupId = data.id || data.jid;
+  const action = data.action; // add, remove, promote, demote
+  const participants = data.participants || [];
 
   logger.debug('Group participants update', { groupId, action, count: participants.length });
 

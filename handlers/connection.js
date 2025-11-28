@@ -14,14 +14,17 @@ const logger = require('../utils/logger');
 async function handleUpdate(payload, context) {
   statsService.increment('CONNECTION_UPDATE', 'total');
 
+  // Evolution API wraps data in 'data' field
+  const data = payload.data || payload;
+
   // Evolution API can send state in different fields
-  const state = payload.state || payload.status || payload.connection;
+  const state = data.state || data.status || data.connection;
   const previousState = connectionService.getStatus();
 
   // Update connection state
   const result = connectionService.updateStatus(state, {
-    reason: payload.reason,
-    phoneNumber: payload.phoneNumber || payload.owner
+    reason: data.reason,
+    phoneNumber: data.phoneNumber || data.owner
   });
 
   statsService.logEvent({
@@ -69,7 +72,7 @@ async function handleUpdate(payload, context) {
       details: {
         previousState,
         newState: result.newStatus,
-        reason: payload.reason || 'unknown'
+        reason: data.reason || 'unknown'
       },
       actions: [
         { label: 'View Dashboard', url: '/' },
@@ -98,8 +101,11 @@ async function handleUpdate(payload, context) {
 async function handleQRCode(payload, context) {
   statsService.increment('QRCODE_UPDATED', 'total');
 
+  // Evolution API wraps data in 'data' field
+  const data = payload.data || payload;
+
   // Extract QR code - Evolution API can send in different formats
-  const qrCode = payload.qrcode || payload.base64 || payload.code;
+  const qrCode = data.qrcode || data.base64 || data.code;
 
   // Store QR code
   connectionService.setQRCode(qrCode);
@@ -133,6 +139,9 @@ async function handleQRCode(payload, context) {
 async function handleLogout(payload, context) {
   statsService.increment('LOGOUT_INSTANCE', 'total');
 
+  // Evolution API wraps data in 'data' field
+  const data = payload.data || payload;
+
   connectionService.updateStatus('logged_out', {
     reason: 'logged_out'
   });
@@ -148,7 +157,7 @@ async function handleLogout(payload, context) {
     title: 'WhatsApp Logged Out!',
     message: 'The WhatsApp session was logged out. Re-authentication required.',
     details: {
-      instance: payload.instance || process.env.INSTANCE_NAME
+      instance: data.instance || process.env.INSTANCE_NAME
     },
     actions: [
       { label: 'View Dashboard', url: '/' },
@@ -165,6 +174,9 @@ async function handleLogout(payload, context) {
 async function handleRemove(payload, context) {
   statsService.increment('REMOVE_INSTANCE', 'total');
 
+  // Evolution API wraps data in 'data' field
+  const data = payload.data || payload;
+
   statsService.logEvent({
     event: 'REMOVE_INSTANCE',
     action: 'alert_sent'
@@ -176,7 +188,7 @@ async function handleRemove(payload, context) {
     title: 'Instance Removed!',
     message: 'The WhatsApp instance was removed from Evolution API.',
     details: {
-      instance: payload.instance || process.env.INSTANCE_NAME
+      instance: data.instance || process.env.INSTANCE_NAME
     }
   });
 
