@@ -6,6 +6,7 @@
 const webhookService = require('../services/webhook');
 const statsService = require('../services/stats');
 const alertService = require('../services/alerts');
+const messageStore = require('../services/messageStore');
 const logger = require('../utils/logger');
 const { parseRemoteJid, normalizePhone } = require('../utils/validators');
 
@@ -44,6 +45,86 @@ function checkAllowed(remoteJid) {
 }
 
 /**
+ * Extract message content from Evolution API payload
+ */
+function extractMessageContent(data) {
+  const message = data.message || {};
+  const key = data.key || {};
+
+  // Get message body from various possible locations
+  let body = '';
+  let type = 'text';
+  let hasMedia = false;
+  let mediaType = null;
+
+  if (message.conversation) {
+    body = message.conversation;
+    type = 'text';
+  } else if (message.extendedTextMessage?.text) {
+    body = message.extendedTextMessage.text;
+    type = 'text';
+  } else if (message.imageMessage) {
+    body = message.imageMessage.caption || '[Image]';
+    type = 'image';
+    hasMedia = true;
+    mediaType = 'image';
+  } else if (message.videoMessage) {
+    body = message.videoMessage.caption || '[Video]';
+    type = 'video';
+    hasMedia = true;
+    mediaType = 'video';
+  } else if (message.audioMessage) {
+    body = '[Audio]';
+    type = 'audio';
+    hasMedia = true;
+    mediaType = 'audio';
+  } else if (message.documentMessage) {
+    body = message.documentMessage.fileName || '[Document]';
+    type = 'document';
+    hasMedia = true;
+    mediaType = 'document';
+  } else if (message.stickerMessage) {
+    body = '[Sticker]';
+    type = 'sticker';
+    hasMedia = true;
+    mediaType = 'sticker';
+  } else if (message.contactMessage) {
+    body = message.contactMessage.displayName || '[Contact]';
+    type = 'contact';
+  } else if (message.locationMessage) {
+    body = '[Location]';
+    type = 'location';
+  }
+
+  // Get quoted message if exists
+  let quotedMessage = null;
+  const contextInfo = message.extendedTextMessage?.contextInfo ||
+    message.imageMessage?.contextInfo ||
+    message.videoMessage?.contextInfo;
+
+  if (contextInfo?.quotedMessage) {
+    quotedMessage = {
+      body: contextInfo.quotedMessage.conversation ||
+        contextInfo.quotedMessage.extendedTextMessage?.text ||
+        '[Media]'
+    };
+  }
+
+  return {
+    id: key.id,
+    body,
+    type,
+    hasMedia,
+    mediaType,
+    fromMe: key.fromMe || false,
+    timestamp: data.messageTimestamp ?
+      new Date(data.messageTimestamp * 1000).toISOString() :
+      new Date().toISOString(),
+    quotedMessage
+  };
+}
+
+/**
  * Handle MESSAGES_UPSERT - New incoming message
  */
 async function handleUpsert(payload, context) {
@@ -71,6 +152,18 @@ async function handleUpsert(payload, context) {
     });
     logger.filter(sourceId, false, sourceType);
     return { action: 'filtered', reason };
+  }
+
+  // Store the message for later retrieval (only for personal messages, not groups)
+  if (sourceType === 'personal') {
+    try {
+      const messageContent = extractMessageContent(data);
+      messageStore.storeMessage(sourceId, messageContent);
+      logger.debug('Message stored', { phone: sourceId, type: messageContent.type });
+    } catch (storeError) {
+      logger.error('Failed to store message', { error: storeError.message });
+      // Don't fail the whole operation if storage fails
+    }
   }
 
   // Forward to n8n
@@ -181,6 +274,22 @@ async function handleSet(payload, context) {
  */
 async function handleSend(payload, context) {
   statsService.increment('SEND_MESSAGE', 'total');
+
+  // Extract and store outgoing message
+  const data = payload.data || payload;
+  const remoteJid = data.key?.remoteJid || '';
+  const { sourceId, sourceType } = parseRemoteJid(remoteJid);
+
+  if (sourceType === 'personal' && sourceId) {
+    try {
+      const messageContent = extractMessageContent(data);
+      messageContent.fromMe = true; // Mark as outgoing
+      messageStore.storeMessage(sourceId, messageContent);
+      logger.debug('Outgoing message stored', { phone: sourceId, type: messageContent.type });
+    } catch (storeError) {
+      logger.error('Failed to store outgoing message', { error: storeError.message });
+    }
+  }
 
   if (process.env.ENABLE_OUTGOING_MESSAGES === 'true') {
     try {

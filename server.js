@@ -15,6 +15,7 @@ const statsService = require('./services/stats');
 const connectionService = require('./services/connection');
 const alertService = require('./services/alerts');
 const webhookService = require('./services/webhook');
+const messageStore = require('./services/messageStore');
 
 // Handlers
 const eventRouter = require('./handlers/index');
@@ -677,6 +678,48 @@ app.post('/api/webhook', (req, res) => {
   });
 });
 
+// ============ MESSAGE STORAGE ENDPOINTS ============
+
+// Get messages for a phone number
+app.get('/api/messages', (req, res) => {
+  const { phone, limit, offset } = req.query;
+
+  if (!phone) {
+    return res.status(400).json({ error: 'Missing required parameter: phone' });
+  }
+
+  const result = messageStore.getMessages(phone, {
+    limit: parseInt(limit) || 50,
+    offset: parseInt(offset) || 0
+  });
+
+  res.json(result);
+});
+
+// Get all phones with stored messages
+app.get('/api/messages/phones', (req, res) => {
+  const phones = messageStore.getPhones();
+  res.json({ phones });
+});
+
+// Get message store stats
+app.get('/api/messages/stats', (req, res) => {
+  res.json(messageStore.getStats());
+});
+
+// Delete messages for a phone number
+app.delete('/api/messages/:phone', async (req, res) => {
+  const { phone } = req.params;
+  const count = messageStore.deleteMessages(phone);
+
+  if (count === 0) {
+    return res.status(404).json({ error: 'No messages found for this phone' });
+  }
+
+  await messageStore.save();
+  res.json({ success: true, deleted: count });
+});
+
 // 404 handler
 app.use((req, res) => {
   res.status(404).json({ error: 'Not found' });
@@ -690,6 +733,10 @@ async function startServer() {
   // Load stats
   await statsService.load();
   statsService.startAutoSave();
+
+  // Load message store
+  await messageStore.load();
+  messageStore.startAutoSave();
 
   // Initialize webhook service
   webhookService.init(config.webhookUrl);
@@ -725,6 +772,7 @@ process.on('SIGTERM', async () => {
   logger.info('Received SIGTERM, shutting down gracefully');
   await saveConfig();
   await statsService.save();
+  await messageStore.save();
   process.exit(0);
 });
 
@@ -732,6 +780,7 @@ process.on('SIGINT', async () => {
   logger.info('Received SIGINT, shutting down gracefully');
   await saveConfig();
   await statsService.save();
+  await messageStore.save();
   process.exit(0);
 });
 
