@@ -463,6 +463,15 @@
             opacity: 0.8;
         }
 
+        .event-sender {
+            color: #00ff9f;
+            font-weight: 500;
+            max-width: 120px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
         /* Event Stats Bars */
         .event-stats-grid {
             display: grid;
@@ -973,13 +982,16 @@
                 const time = new Date(e.timestamp);
                 const timeStr = time.toLocaleTimeString('en-US', { hour12: false });
                 const actionText = (e.action || 'logged').toUpperCase();
+                const senderDisplay = e.senderName || e.source || '-';
+                const sourceDisplay = e.senderName && e.source ? e.source : '';
 
                 return `
                     <div class="event-item">
                         <span class="event-time">${timeStr}</span>
                         <span class="event-action ${e.action || 'logged'}">${actionText}</span>
                         <span class="event-type">${e.event}</span>
-                        <span class="event-source">${e.source || '-'}</span>
+                        <span class="event-sender" title="${e.senderName || ''}">${senderDisplay}</span>
+                        ${sourceDisplay ? `<span class="event-source">${sourceDisplay}</span>` : ''}
                     </div>
                 `;
             }).join('');
