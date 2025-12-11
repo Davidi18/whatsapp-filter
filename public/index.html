@@ -463,6 +463,15 @@
             opacity: 0.8;
         }
 
+        .event-sender {
+            color: #00ff9f;
+            font-weight: 500;
+            max-width: 120px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
         /* Event Stats Bars */
         .event-stats-grid {
             display: grid;
@@ -646,13 +655,145 @@
                 grid-template-columns: 1fr 1fr;
             }
         }
+
+        /* Login Screen */
+        .login-screen {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .login-box {
+            background: #1a2332;
+            border: 2px solid #00ff9f;
+            border-radius: 8px;
+            box-shadow: 0 0 30px rgba(0,255,159,0.3);
+            max-width: 400px;
+            width: 100%;
+        }
+
+        .login-header {
+            background: #00ff9f;
+            color: #0d1b2a;
+            padding: 20px;
+            font-weight: 900;
+            font-size: 16px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            text-align: center;
+        }
+
+        .login-content {
+            padding: 30px;
+        }
+
+        .login-input {
+            width: 100%;
+            padding: 15px;
+            margin-bottom: 15px;
+            background: #0d1b2a;
+            border: 1px solid #00ff9f;
+            border-radius: 4px;
+            color: #00ff9f;
+            font-family: 'Orbitron', monospace;
+            font-size: 14px;
+            outline: none;
+        }
+
+        .login-input:focus {
+            box-shadow: 0 0 10px rgba(0,255,159,0.3);
+        }
+
+        .login-input::placeholder {
+            color: rgba(0,255,159,0.5);
+        }
+
+        .login-btn {
+            width: 100%;
+            padding: 15px;
+            background: #00ff9f;
+            color: #0d1b2a;
+            border: none;
+            border-radius: 4px;
+            font-family: 'Orbitron', monospace;
+            font-weight: 700;
+            font-size: 14px;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .login-btn:hover {
+            background: #00cc7f;
+            box-shadow: 0 0 15px rgba(0,255,159,0.5);
+        }
+
+        .login-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .login-error {
+            color: #ff4757;
+            text-align: center;
+            margin-bottom: 15px;
+            font-size: 12px;
+            min-height: 18px;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        /* Logout button */
+        .logout-btn {
+            background: transparent;
+            border: 1px solid #0d1b2a;
+            color: #0d1b2a;
+            padding: 5px 12px;
+            border-radius: 4px;
+            font-family: 'Orbitron', monospace;
+            font-size: 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .logout-btn:hover {
+            background: #0d1b2a;
+            color: #00ff9f;
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
     </style>
 </head>
 <body>
-    <div class="terminal">
+    <!-- Login Screen -->
+    <div class="login-screen" id="loginScreen">
+        <div class="login-box">
+            <div class="login-header">&gt; SYSTEM LOGIN</div>
+            <div class="login-content">
+                <div class="login-error" id="loginError"></div>
+                <input type="text" class="login-input" id="loginUsername" placeholder="USERNAME" autocomplete="username">
+                <input type="password" class="login-input" id="loginPassword" placeholder="PASSWORD" autocomplete="current-password">
+                <button class="login-btn" id="loginBtn" onclick="handleLogin()">ACCESS SYSTEM</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Terminal (hidden until logged in) -->
+    <div class="terminal hidden" id="mainTerminal">
         <div class="header">
             <span>&gt; FILTER CONTROL SYSTEM</span>
-            <span class="version-badge">v2.0</span>
+            <div class="header-right">
+                <span class="version-badge">v2.0</span>
+                <button class="logout-btn" onclick="handleLogout()">LOGOUT</button>
+            </div>
         </div>
 
         <div class="content">
@@ -829,6 +970,132 @@
     <div class="toast" id="toast"></div>
 
     <script>
+        // ============ AUTHENTICATION ============
+        const AUTH_TOKEN_KEY = 'filter_auth_token';
+
+        function getAuthToken() {
+            return localStorage.getItem(AUTH_TOKEN_KEY);
+        }
+
+        function setAuthToken(token) {
+            localStorage.setItem(AUTH_TOKEN_KEY, token);
+        }
+
+        function clearAuthToken() {
+            localStorage.removeItem(AUTH_TOKEN_KEY);
+        }
+
+        // Authenticated fetch wrapper
+        async function authFetch(url, options = {}) {
+            const token = getAuthToken();
+            if (!token) {
+                throw new Error('Not authenticated');
+            }
+
+            const headers = {
+                ...options.headers,
+                'Authorization': `Bearer ${token}`
+            };
+
+            const response = await fetch(url, { ...options, headers });
+
+            if (response.status === 401) {
+                clearAuthToken();
+                showLoginScreen();
+                throw new Error('Session expired');
+            }
+
+            return response;
+        }
+
+        async function handleLogin() {
+            const username = document.getElementById('loginUsername').value.trim();
+            const password = document.getElementById('loginPassword').value;
+            const errorEl = document.getElementById('loginError');
+            const btnEl = document.getElementById('loginBtn');
+
+            if (!username || !password) {
+                errorEl.textContent = 'ENTER USERNAME AND PASSWORD';
+                return;
+            }
+
+            btnEl.disabled = true;
+            btnEl.textContent = 'AUTHENTICATING...';
+            errorEl.textContent = '';
+
+            try {
+                const response = await fetch('/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.token) {
+                    setAuthToken(data.token);
+                    showMainScreen();
+                    initializeApp();
+                } else {
+                    errorEl.textContent = data.error || 'ACCESS DENIED';
+                }
+            } catch (error) {
+                errorEl.textContent = 'CONNECTION ERROR';
+            } finally {
+                btnEl.disabled = false;
+                btnEl.textContent = 'ACCESS SYSTEM';
+            }
+        }
+
+        async function handleLogout() {
+            try {
+                await authFetch('/auth/logout', { method: 'POST' });
+            } catch (e) {
+                // Ignore errors
+            }
+            clearAuthToken();
+            showLoginScreen();
+        }
+
+        function showLoginScreen() {
+            document.getElementById('loginScreen').classList.remove('hidden');
+            document.getElementById('mainTerminal').classList.add('hidden');
+            document.getElementById('loginUsername').value = '';
+            document.getElementById('loginPassword').value = '';
+            document.getElementById('loginError').textContent = '';
+        }
+
+        function showMainScreen() {
+            document.getElementById('loginScreen').classList.add('hidden');
+            document.getElementById('mainTerminal').classList.remove('hidden');
+        }
+
+        async function checkAuth() {
+            const token = getAuthToken();
+            if (!token) {
+                showLoginScreen();
+                return false;
+            }
+
+            try {
+                const response = await fetch('/auth/verify', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                if (response.ok) {
+                    showMainScreen();
+                    return true;
+                }
+            } catch (e) {
+                // Ignore
+            }
+
+            clearAuthToken();
+            showLoginScreen();
+            return false;
+        }
+
+        // ============ APP STATE ============
         let contacts = [];
         let groups = [];
         let stats = { totalMessages: 0, filteredMessages: 0, allowedMessages: 0 };
@@ -841,7 +1108,7 @@
         // Load data from server
         async function loadConfig() {
             try {
-                const response = await fetch('/api/config');
+                const response = await authFetch('/api/config');
                 if (response.ok) {
                     const data = await response.json();
                     contacts = data.contacts || [];
@@ -927,7 +1194,7 @@
         // Load recent events
         async function loadRecentEvents() {
             try {
-                const response = await fetch('/api/events/recent?limit=50');
+                const response = await authFetch('/api/events/recent?limit=50');
                 if (response.ok) {
                     const data = await response.json();
                     allEvents = data.events || [];
@@ -973,13 +1240,16 @@
                 const time = new Date(e.timestamp);
                 const timeStr = time.toLocaleTimeString('en-US', { hour12: false });
                 const actionText = (e.action || 'logged').toUpperCase();
+                const senderDisplay = e.senderName || e.source || '-';
+                const sourceDisplay = e.senderName && e.source ? e.source : '';
 
                 return `
                     <div class="event-item">
                         <span class="event-time">${timeStr}</span>
                         <span class="event-action ${e.action || 'logged'}">${actionText}</span>
                         <span class="event-type">${e.event}</span>
-                        <span class="event-source">${e.source || '-'}</span>
+                        <span class="event-sender" title="${e.senderName || ''}">${senderDisplay}</span>
+                        ${sourceDisplay ? `<span class="event-source">${sourceDisplay}</span>` : ''}
                     </div>
                 `;
             }).join('');
@@ -994,7 +1264,7 @@
         // Load event statistics
         async function loadEventStats() {
             try {
-                const response = await fetch('/api/stats');
+                const response = await authFetch('/api/stats');
                 if (response.ok) {
                     const data = await response.json();
                     renderEventStats(data.events || {});
@@ -1025,7 +1295,7 @@
         // Save contacts to server
         async function saveContacts() {
             try {
-                const response = await fetch('/api/contacts', {
+                const response = await authFetch('/api/contacts', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ contacts })
@@ -1213,7 +1483,7 @@
             }
 
             try {
-                const response = await fetch('/api/groups/add', {
+                const response = await authFetch('/api/groups/add', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ groupId, name })
@@ -1245,7 +1515,7 @@
             const group = groups[index];
 
             try {
-                const response = await fetch(`/api/groups/${group.groupId}`, {
+                const response = await authFetch(`/api/groups/${group.groupId}`, {
                     method: 'DELETE'
                 });
 
@@ -1274,7 +1544,7 @@
             }, 2000);
         }
 
-        // Enter key navigation
+        // Enter key navigation for contacts form
         document.getElementById('phoneInput').addEventListener('keypress', function(e) {
             if (e.key === 'Enter') {
                 document.getElementById('nameInput').focus();
@@ -1293,23 +1563,57 @@
             }
         });
 
-        // Auto-refresh data every 5 seconds
-        setInterval(() => {
+        // Enter key support for login form
+        document.getElementById('loginUsername').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                document.getElementById('loginPassword').focus();
+            }
+        });
+
+        document.getElementById('loginPassword').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                handleLogin();
+            }
+        });
+
+        // App initialization (called after successful login)
+        let refreshIntervals = [];
+
+        function initializeApp() {
+            // Clear any existing intervals
+            refreshIntervals.forEach(id => clearInterval(id));
+            refreshIntervals = [];
+
+            // Load initial data
+            loadConfig();
             loadSystemInfo();
             loadRecentEvents();
-        }, 5000);
-
-        // Refresh stats every 30 seconds
-        setInterval(() => {
-            loadConfig();
             loadEventStats();
-        }, 30000);
 
-        // Initial load
-        loadConfig();
-        loadSystemInfo();
-        loadRecentEvents();
-        loadEventStats();
+            // Auto-refresh data every 5 seconds
+            refreshIntervals.push(setInterval(() => {
+                if (getAuthToken()) {
+                    loadSystemInfo();
+                    loadRecentEvents();
+                }
+            }, 5000));
+
+            // Refresh stats every 30 seconds
+            refreshIntervals.push(setInterval(() => {
+                if (getAuthToken()) {
+                    loadConfig();
+                    loadEventStats();
+                }
+            }, 30000));
+        }
+
+        // Check authentication on page load
+        (async function() {
+            const isAuthenticated = await checkAuth();
+            if (isAuthenticated) {
+                initializeApp();
+            }
+        })();
     </script>
 </body>
 </html>

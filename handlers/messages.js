@@ -135,6 +135,9 @@ async function handleUpsert(payload, context) {
   const remoteJid = data.key?.remoteJid || '';
   const { isAllowed, sourceId, sourceType, reason } = checkAllowed(remoteJid);
 
+  // Extract sender name (pushName) from Evolution API payload
+  const senderName = data.pushName || '';
+
   // Skip status broadcasts silently
   if (sourceType === 'status') {
     statsService.increment('MESSAGES_UPSERT', 'filtered');
@@ -147,6 +150,7 @@ async function handleUpsert(payload, context) {
       event: 'MESSAGES_UPSERT',
       source: sourceId,
       sourceType,
+      senderName,
       action: 'filtered',
       reason
     });
@@ -179,6 +183,7 @@ async function handleUpsert(payload, context) {
       event: 'MESSAGES_UPSERT',
       source: sourceId,
       sourceType,
+      senderName,
       action: 'forwarded',
       details: {
         messageType: data.message?.conversation ? 'text' : 'media'
@@ -193,6 +198,7 @@ async function handleUpsert(payload, context) {
       event: 'MESSAGES_UPSERT',
       source: sourceId,
       sourceType,
+      senderName,
       action: 'failed',
       error: error.message
     });
