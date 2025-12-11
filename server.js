@@ -9,6 +9,7 @@ const path = require('path');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const crypto = require('crypto');
 
 // Services
 const statsService = require('./services/stats');
@@ -49,24 +50,59 @@ app.use(helmet({
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
-// Basic authentication middleware
-function basicAuth(req, res, next) {
+// Session token store (in-memory)
+const sessions = new Map();
+const SESSION_EXPIRY = 24 * 60 * 60 * 1000; // 24 hours
+
+// Generate secure session token
+function generateToken() {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+// Clean expired sessions periodically
+setInterval(() => {
+  const now = Date.now();
+  for (const [token, session] of sessions) {
+    if (now > session.expiresAt) {
+      sessions.delete(token);
+    }
+  }
+}, 60 * 60 * 1000); // Clean every hour
+
+// Authentication middleware (supports both Basic Auth and Bearer token)
+function authMiddleware(req, res, next) {
   const auth = req.headers.authorization;
 
-  if (!auth || !auth.startsWith('Basic ')) {
-    res.set('WWW-Authenticate', 'Basic realm="Admin Area"');
+  if (!auth) {
     return res.status(401).json({ error: 'Authentication required' });
   }
 
-  const credentials = Buffer.from(auth.slice(6), 'base64').toString().split(':');
-  const [username, password] = credentials;
+  // Bearer token authentication
+  if (auth.startsWith('Bearer ')) {
+    const token = auth.slice(7);
+    const session = sessions.get(token);
 
-  if (username === process.env.ADMIN_USERNAME && password === process.env.ADMIN_PASSWORD) {
-    next();
-  } else {
-    res.set('WWW-Authenticate', 'Basic realm="Admin Area"');
+    if (session && Date.now() < session.expiresAt) {
+      session.lastActivity = Date.now();
+      req.user = session.username;
+      return next();
+    }
+    return res.status(401).json({ error: 'Invalid or expired token' });
+  }
+
+  // Basic authentication (fallback for API clients)
+  if (auth.startsWith('Basic ')) {
+    const credentials = Buffer.from(auth.slice(6), 'base64').toString().split(':');
+    const [username, password] = credentials;
+
+    if (username === process.env.ADMIN_USERNAME && password === process.env.ADMIN_PASSWORD) {
+      req.user = username;
+      return next();
+    }
     return res.status(401).json({ error: 'Invalid credentials' });
   }
+
+  return res.status(401).json({ error: 'Invalid authentication method' });
 }
 
 // IP whitelist middleware (optional)
@@ -172,8 +208,81 @@ async function saveConfig() {
 }
 
 // Apply authentication and IP whitelist to admin routes
-app.use('/api', basicAuth);
+app.use('/api', authMiddleware);
 app.use('/', ipWhitelist);
+
+// ============ AUTH ENDPOINTS (PUBLIC) ============
+
+// Login endpoint
+app.post('/auth/login', (req, res) => {
+  const { username, password } = req.body;
+
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Username and password required' });
+  }
+
+  if (username === process.env.ADMIN_USERNAME && password === process.env.ADMIN_PASSWORD) {
+    const token = generateToken();
+    const expiresAt = Date.now() + SESSION_EXPIRY;
+
+    sessions.set(token, {
+      username,
+      createdAt: Date.now(),
+      expiresAt,
+      lastActivity: Date.now()
+    });
+
+    logger.info('User logged in', { username });
+
+    return res.json({
+      success: true,
+      token,
+      expiresAt: new Date(expiresAt).toISOString(),
+      username
+    });
+  }
+
+  logger.warn('Failed login attempt', { username });
+  return res.status(401).json({ error: 'Invalid credentials' });
+});
+
+// Logout endpoint
+app.post('/auth/logout', (req, res) => {
+  const auth = req.headers.authorization;
+
+  if (auth && auth.startsWith('Bearer ')) {
+    const token = auth.slice(7);
+    if (sessions.has(token)) {
+      const session = sessions.get(token);
+      logger.info('User logged out', { username: session.username });
+      sessions.delete(token);
+    }
+  }
+
+  res.json({ success: true });
+});
+
+// Verify token endpoint
+app.get('/auth/verify', (req, res) => {
+  const auth = req.headers.authorization;
+
+  if (!auth || !auth.startsWith('Bearer ')) {
+    return res.status(401).json({ valid: false });
+  }
+
+  const token = auth.slice(7);
+  const session = sessions.get(token);
+
+  if (session && Date.now() < session.expiresAt) {
+    return res.json({
+      valid: true,
+      username: session.username,
+      expiresAt: new Date(session.expiresAt).toISOString()
+    });
+  }
+
+  return res.status(401).json({ valid: false });
+});
 
 // Serve static files
 app.use(express.static('public', {
