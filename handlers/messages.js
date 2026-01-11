@@ -170,6 +170,27 @@ async function handleUpsert(payload, context) {
     }
   }
 
+  // Check if webhook is configured
+  const webhookHealth = webhookService.getHealth();
+
+  // If no webhook configured, just mark as stored (Baileys-only mode)
+  if (!webhookHealth.configured) {
+    statsService.increment('MESSAGES_UPSERT', 'forwarded'); // Count as success
+    statsService.logEvent({
+      event: 'MESSAGES_UPSERT',
+      source: sourceId,
+      sourceType,
+      senderName,
+      action: 'stored',
+      details: {
+        messageType: data.message?.conversation ? 'text' : 'media',
+        mode: 'baileys-only'
+      }
+    });
+    logger.filter(sourceId, true, sourceType);
+    return { action: 'stored', source: sourceId, sourceType };
+  }
+
   // Forward to n8n
   try {
     await webhookService.forward(payload, {
@@ -297,7 +318,9 @@ async function handleSend(payload, context) {
     }
   }
 
-  if (process.env.ENABLE_OUTGOING_MESSAGES === 'true') {
+  // Check if webhook forwarding is enabled and configured
+  const webhookHealth = webhookService.getHealth();
+  if (process.env.ENABLE_OUTGOING_MESSAGES === 'true' && webhookHealth.configured) {
     try {
       await webhookService.forward(payload, { event: 'SEND_MESSAGE' });
       statsService.increment('SEND_MESSAGE', 'forwarded');
@@ -315,9 +338,9 @@ async function handleSend(payload, context) {
 
   statsService.logEvent({
     event: 'SEND_MESSAGE',
-    action: 'logged'
+    action: 'stored'
   });
-  return { action: 'logged' };
+  return { action: 'stored' };
 }
 
 module.exports = {
