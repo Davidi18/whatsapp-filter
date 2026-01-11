@@ -50,23 +50,21 @@ function initialize() {
       'connected': 'connected',
       'connecting': 'connecting',
       'disconnected': 'disconnected',
-      'waiting_qr': 'qr_pending',
+      'waiting_qr': 'connecting',
       'error': 'disconnected'
     };
 
     const mappedStatus = statusMap[update.status] || 'unknown';
 
     // Update connection service
-    connectionService.updateState({
-      status: mappedStatus,
+    connectionService.updateStatus(mappedStatus, {
       phoneNumber: update.phoneNumber || null,
-      instance: 'baileys-direct',
-      source: 'baileys'
+      reason: update.reason || 'baileys'
     });
 
     // Store QR code if available
     if (update.qrCode) {
-      connectionService.updateQRCode({
+      connectionService.setQRCode({
         base64: update.qrCode,
         instance: 'baileys-direct'
       });
