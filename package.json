@@ -18,8 +18,8 @@
     "pino": "^9.6.0"
   },
   "engines": {
-    "node": ">=18.0.0",
-    "npm": ">=8.0.0"
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
   },
   "keywords": ["whatsapp", "filter", "webhook", "n8n", "evolution-api", "alerts"],
   "author": "Your Name",
