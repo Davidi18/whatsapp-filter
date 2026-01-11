@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self';">
     <title>Filter Control</title>
 
     <!-- Retro Terminal Favicon -->
@@ -1066,8 +1067,10 @@
             <div class="section">
                 <div class="section-header section-toggle" onclick="toggleSection(this)">
                     <span><span class="toggle-icon">▼</span> AUTHORIZED CONTACTS</span>
+                    <span id="contactCount" style="font-size: 10px; opacity: 0.7;">0</span>
                 </div>
                 <div class="section-content">
+                    <input type="text" class="input-field" id="contactSearchInput" placeholder="Search contacts..." oninput="renderContacts(this.value)" style="margin-bottom: 15px; width: 100%;">
                     <div id="contactsList" class="contact-list">
                         <div class="empty-state">
                             <div class="empty-icon">⊗</div>
@@ -1110,8 +1113,10 @@
             <div class="section">
                 <div class="section-header section-toggle" onclick="toggleSection(this)">
                     <span><span class="toggle-icon">▼</span> AUTHORIZED GROUPS</span>
+                    <span id="groupCount" style="font-size: 10px; opacity: 0.7;">0</span>
                 </div>
                 <div class="section-content">
+                    <input type="text" class="input-field" id="groupSearchInput" placeholder="Search groups..." oninput="renderGroups(this.value)" style="margin-bottom: 15px; width: 100%;">
                     <div id="groupsList" class="contact-list">
                         <div class="empty-state">
                             <div class="empty-icon">⊗</div>
@@ -1170,6 +1175,14 @@
             const errorEl = document.getElementById('loginError');
             const btnEl = document.getElementById('loginBtn');
 
+            // Check rate limiting
+            const now = Date.now();
+            if (loginLockoutUntil > now) {
+                const remaining = Math.ceil((loginLockoutUntil - now) / 1000);
+                errorEl.textContent = `TOO MANY ATTEMPTS. WAIT ${remaining}S`;
+                return;
+            }
+
             if (!username || !password) {
                 errorEl.textContent = 'ENTER USERNAME AND PASSWORD';
                 return;
@@ -1189,11 +1202,18 @@
                 const data = await response.json();
 
                 if (response.ok && data.token) {
+                    loginAttempts = 0; // Reset on success
                     setAuthToken(data.token);
                     showMainScreen();
                     initializeApp();
                 } else {
-                    errorEl.textContent = data.error || 'ACCESS DENIED';
+                    loginAttempts++;
+                    if (loginAttempts >= MAX_LOGIN_ATTEMPTS) {
+                        loginLockoutUntil = Date.now() + LOCKOUT_DURATION;
+                        errorEl.textContent = 'TOO MANY ATTEMPTS. LOCKED FOR 1 MIN';
+                    } else {
+                        errorEl.textContent = data.error || 'ACCESS DENIED';
+                    }
                 }
             } catch (error) {
                 errorEl.textContent = 'CONNECTION ERROR';
@@ -1257,6 +1277,12 @@
         let stats = { totalMessages: 0, filteredMessages: 0, allowedMessages: 0 };
         let baileysMode = false;
         let baileysStatus = 'unknown';
+
+        // Rate limiting for login
+        let loginAttempts = 0;
+        let loginLockoutUntil = 0;
+        const MAX_LOGIN_ATTEMPTS = 5;
+        const LOCKOUT_DURATION = 60000; // 1 minute
 
         // ============ BAILEYS FUNCTIONS ============
 
@@ -1662,27 +1688,45 @@
             return input.replace(/[<>\"'&]/g, '');
         }
 
-        function renderContacts() {
+        function renderContacts(searchTerm = '') {
             const list = document.getElementById('contactsList');
+            const countEl = document.getElementById('contactCount');
 
-            if (contacts.length === 0) {
+            // Update total count
+            if (countEl) countEl.textContent = contacts.length;
+
+            // Filter contacts by search term
+            let filtered = contacts;
+            if (searchTerm) {
+                const term = searchTerm.toLowerCase();
+                filtered = contacts.filter(c =>
+                    c.phone.toLowerCase().includes(term) ||
+                    c.name.toLowerCase().includes(term)
+                );
+            }
+
+            if (filtered.length === 0) {
+                const msg = searchTerm ? 'NO MATCHING CONTACTS' : 'NO CONTACTS FOUND';
                 list.innerHTML = `
                     <div class="empty-state">
                         <div class="empty-icon">⊗</div>
-                        <div>NO CONTACTS FOUND</div>
+                        <div>${msg}</div>
                     </div>
                 `;
                 return;
             }
 
-            list.innerHTML = contacts.map((contact, index) => `
-                <div class="contact-item">
-                    <div class="contact-number">${contact.phone}</div>
-                    <div class="contact-name">${contact.name}</div>
-                    <div class="contact-type">${contact.type}</div>
-                    <button class="remove-btn" onclick="removeContact(${index})">×</button>
-                </div>
-            `).join('');
+            list.innerHTML = filtered.map((contact, index) => {
+                const realIndex = contacts.indexOf(contact);
+                return `
+                    <div class="contact-item">
+                        <div class="contact-number">${escapeHtml(contact.phone)}</div>
+                        <div class="contact-name">${escapeHtml(contact.name)}</div>
+                        <div class="contact-type">${escapeHtml(contact.type)}</div>
+                        <button class="remove-btn" onclick="removeContact(${realIndex})" title="Remove contact">×</button>
+                    </div>
+                `;
+            }).join('');
         }
 
         async function addContact() {
@@ -1740,17 +1784,24 @@
         async function removeContact(index) {
             if (index < 0 || index >= contacts.length) return;
 
+            const contact = contacts[index];
+            if (!confirm(`Remove "${contact.name}" (${contact.phone})?`)) {
+                return;
+            }
+
             const removedContact = contacts[index];
             contacts.splice(index, 1);
 
             try {
                 await saveContacts();
-                renderContacts();
+                const searchInput = document.getElementById('contactSearchInput');
+                renderContacts(searchInput?.value || '');
                 loadSystemInfo();
                 showToast('CONTACT REMOVED');
             } catch (error) {
                 contacts.splice(index, 0, removedContact);
-                renderContacts();
+                const searchInput = document.getElementById('contactSearchInput');
+                renderContacts(searchInput?.value || '');
             }
         }
 
@@ -1762,26 +1813,44 @@
             return groupIdRegex.test(cleanId);
         }
 
-        function renderGroups() {
+        function renderGroups(searchTerm = '') {
             const list = document.getElementById('groupsList');
+            const countEl = document.getElementById('groupCount');
 
-            if (groups.length === 0) {
+            // Update total count
+            if (countEl) countEl.textContent = groups.length;
+
+            // Filter groups by search term
+            let filtered = groups;
+            if (searchTerm) {
+                const term = searchTerm.toLowerCase();
+                filtered = groups.filter(g =>
+                    g.groupId.toLowerCase().includes(term) ||
+                    g.name.toLowerCase().includes(term)
+                );
+            }
+
+            if (filtered.length === 0) {
+                const msg = searchTerm ? 'NO MATCHING GROUPS' : 'NO GROUPS FOUND';
                 list.innerHTML = `
                     <div class="empty-state">
                         <div class="empty-icon">⊗</div>
-                        <div>NO GROUPS FOUND</div>
+                        <div>${msg}</div>
                     </div>
                 `;
                 return;
             }
 
-            list.innerHTML = groups.map((group, index) => `
-                <div class="contact-item" style="grid-template-columns: 1fr 1fr 60px;">
-                    <div class="contact-number">${group.groupId}</div>
-                    <div class="contact-name">${group.name}</div>
-                    <button class="remove-btn" onclick="removeGroup(${index})">×</button>
-                </div>
-            `).join('');
+            list.innerHTML = filtered.map((group, index) => {
+                const realIndex = groups.indexOf(group);
+                return `
+                    <div class="contact-item" style="grid-template-columns: 1fr 1fr 60px;">
+                        <div class="contact-number">${escapeHtml(group.groupId)}</div>
+                        <div class="contact-name">${escapeHtml(group.name)}</div>
+                        <button class="remove-btn" onclick="removeGroup(${realIndex})" title="Remove group">×</button>
+                    </div>
+                `;
+            }).join('');
         }
 
         async function addGroup() {
@@ -1847,6 +1916,9 @@
             if (index < 0 || index >= groups.length) return;
 
             const group = groups[index];
+            if (!confirm(`Remove group "${group.name}"?`)) {
+                return;
+            }
 
             try {
                 const response = await authFetch(`/api/groups/${group.groupId}`, {
@@ -1858,7 +1930,8 @@
                 }
 
                 groups.splice(index, 1);
-                renderGroups();
+                const searchInput = document.getElementById('groupSearchInput');
+                renderGroups(searchInput?.value || '');
                 loadSystemInfo();
                 showToast('GROUP REMOVED');
             } catch (error) {
