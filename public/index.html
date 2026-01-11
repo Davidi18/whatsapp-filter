@@ -391,9 +391,50 @@
             transition: all 0.2s;
         }
 
+        /* Group messages - purple tint */
+        .event-card.source-group {
+            border-left: 3px solid #a855f7;
+            background: rgba(168, 85, 247, 0.05);
+        }
+
+        /* Personal messages - cyan tint */
+        .event-card.source-contact {
+            border-left: 3px solid #00d9ff;
+            background: rgba(0, 217, 255, 0.05);
+        }
+
         .event-card:hover {
             border-color: rgba(0,255,159,0.4);
             background: rgba(0,255,159,0.03);
+        }
+
+        .event-card.source-group:hover {
+            border-color: rgba(168, 85, 247, 0.6);
+            border-left-color: #a855f7;
+        }
+
+        .event-card.source-contact:hover {
+            border-color: rgba(0, 217, 255, 0.6);
+            border-left-color: #00d9ff;
+        }
+
+        .source-type-badge {
+            font-size: 8px;
+            padding: 2px 5px;
+            border-radius: 3px;
+            font-weight: 600;
+            text-transform: uppercase;
+            margin-left: 6px;
+        }
+
+        .source-type-badge.group {
+            background: rgba(168, 85, 247, 0.2);
+            color: #a855f7;
+        }
+
+        .source-type-badge.contact {
+            background: rgba(0, 217, 255, 0.2);
+            color: #00d9ff;
         }
 
         .event-card-header {
@@ -1000,10 +1041,13 @@
                 </div>
                 <div class="section-content">
                     <div class="filter-tabs">
-                        <button class="filter-tab active" onclick="filterEvents('all')">ALL</button>
-                        <button class="filter-tab" onclick="filterEvents('forwarded')">FORWARDED</button>
-                        <button class="filter-tab" onclick="filterEvents('stored')">STORED</button>
-                        <button class="filter-tab" onclick="filterEvents('filtered')">FILTERED</button>
+                        <button class="filter-tab active" data-filter="all" onclick="filterEvents('all')">ALL</button>
+                        <button class="filter-tab" data-filter="forwarded" onclick="filterEvents('forwarded')">FORWARDED</button>
+                        <button class="filter-tab" data-filter="stored" onclick="filterEvents('stored')">STORED</button>
+                        <button class="filter-tab" data-filter="filtered" onclick="filterEvents('filtered')">FILTERED</button>
+                        <span style="opacity: 0.3; margin: 0 5px;">|</span>
+                        <button class="filter-tab" data-filter="group" onclick="filterEvents('group')" style="border-color: #a855f7; color: #a855f7;">GROUPS</button>
+                        <button class="filter-tab" data-filter="contact" onclick="filterEvents('contact')" style="border-color: #00d9ff; color: #00d9ff;">PRIVATE</button>
                     </div>
                     <div class="events-log" id="eventsList">
                         <div class="empty-state">
@@ -1536,9 +1580,14 @@
             }
         }
 
-        // Filter events by action
+        // Filter events by action or source type
         function filterEventsByAction(events, filter) {
             if (filter === 'all') return events;
+            // Source type filters
+            if (filter === 'group' || filter === 'contact') {
+                return events.filter(e => e.sourceType === filter);
+            }
+            // Action filters
             return events.filter(e => e.action === filter);
         }
 
@@ -1546,10 +1595,10 @@
         function filterEvents(filter) {
             currentFilter = filter;
 
-            // Update active tab
+            // Update active tab using data-filter attribute
             document.querySelectorAll('.filter-tab').forEach(tab => {
                 tab.classList.remove('active');
-                if (tab.textContent.toLowerCase() === filter) {
+                if (tab.dataset.filter === filter) {
                     tab.classList.add('active');
                 }
             });
@@ -1575,12 +1624,17 @@
                 const messagePreview = e.messagePreview || '';
                 const msgTypeIcon = getMessageTypeIcon(e.messageType);
                 const eventType = e.event || '';
+                const sourceType = e.sourceType || '';
+                const sourceTypeClass = sourceType ? `source-${sourceType}` : '';
+                const sourceTypeBadge = sourceType === 'group' ? '<span class="source-type-badge group">GROUP</span>' :
+                                        sourceType === 'contact' ? '<span class="source-type-badge contact">PRIVATE</span>' : '';
 
                 return `
-                    <div class="event-card">
+                    <div class="event-card ${sourceTypeClass}">
                         <div class="event-card-header">
                             <span class="event-time">${timeStr}</span>
                             <span class="event-badge ${action}">${action}</span>
+                            ${sourceTypeBadge}
                             <span class="event-type-badge">${eventType}</span>
                         </div>
                         <div class="event-card-body">
