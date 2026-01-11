@@ -309,6 +309,15 @@ async function handleSend(payload, context) {
   const remoteJid = data.key?.remoteJid || '';
   const { sourceId, sourceType } = parseRemoteJid(remoteJid);
 
+  // Check if recipient is in allowed list (only store messages to allowed contacts)
+  const { isAllowed } = checkAllowed(remoteJid);
+
+  // Skip if recipient is not in allowed list
+  if (!isAllowed) {
+    statsService.increment('SEND_MESSAGE', 'filtered');
+    return { action: 'filtered', reason: 'recipient_not_allowed' };
+  }
+
   // Extract message content
   const messageContent = extractMessageContent(data);
   messageContent.fromMe = true; // Mark as outgoing
@@ -322,7 +331,7 @@ async function handleSend(payload, context) {
   const recipientConfig = config?.allowedNumbers?.find(c => normalizePhone(c.phone) === normalizePhone(sourceId));
   const recipientName = recipientConfig?.name || sourceId;
 
-  // Store outgoing message (personal and groups)
+  // Store outgoing message to allowed contact/group
   if (sourceId) {
     try {
       messageStore.storeMessage(sourceId, messageContent);
