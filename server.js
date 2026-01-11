@@ -17,9 +17,11 @@ const connectionService = require('./services/connection');
 const alertService = require('./services/alerts');
 const webhookService = require('./services/webhook');
 const messageStore = require('./services/messageStore');
+const baileysService = require('./services/baileys');
 
 // Handlers
 const eventRouter = require('./handlers/index');
+const baileysEvents = require('./handlers/baileysEvents');
 
 // Utils
 const logger = require('./utils/logger');
@@ -28,12 +30,14 @@ const { isValidPhone, isValidGroupId, isValidContactType, isValidName, normalize
 const app = express();
 app.set('trust proxy', 1); // Trust first proxy (nginx, Cloudflare, etc.)
 const PORT = process.env.PORT || 3000;
-const VERSION = '2.0.0';
+const VERSION = '2.1.0';
 const startedAt = new Date().toISOString();
+const BAILEYS_ENABLED = process.env.BAILEYS_ENABLED === 'true';
 
 // Validate required environment variables
-if (!process.env.WEBHOOK_URL) {
-  console.error('WEBHOOK_URL environment variable is required');
+// WEBHOOK_URL is optional if Baileys mode is enabled (can work standalone)
+if (!process.env.WEBHOOK_URL && !BAILEYS_ENABLED) {
+  console.error('WEBHOOK_URL environment variable is required (or enable BAILEYS_ENABLED=true)');
   process.exit(1);
 }
 
@@ -299,15 +303,30 @@ app.use(express.static('public', {
 app.get('/health', (req, res) => {
   const stats = statsService.getStats();
   const connection = connectionService.getState();
+  const baileysStatus = baileysService.getStatus();
+
+  // Use Baileys connection status if enabled
+  const effectiveConnection = BAILEYS_ENABLED ? {
+    status: baileysStatus.status,
+    phone: baileysStatus.phoneNumber,
+    source: 'baileys'
+  } : {
+    status: connection.status,
+    phone: connection.phoneNumber,
+    source: 'evolution'
+  };
 
   res.json({
     status: 'OK',
     version: VERSION,
     uptime: process.uptime(),
-    connection: {
-      status: connection.status,
-      phone: connection.phoneNumber
-    },
+    mode: BAILEYS_ENABLED ? 'baileys' : 'evolution',
+    connection: effectiveConnection,
+    baileys: BAILEYS_ENABLED ? {
+      enabled: true,
+      status: baileysStatus.status,
+      hasQRCode: baileysStatus.hasQRCode
+    } : { enabled: false },
     stats: {
       messagesForwarded: stats.totals.messagesForwarded,
       messagesFiltered: stats.totals.messagesFiltered,
@@ -496,9 +515,82 @@ app.get('/api/connection', (req, res) => {
   res.json(connectionService.getState());
 });
 
-// Get QR code
+// Get QR code (supports both Evolution API and Baileys)
 app.get('/api/qrcode', (req, res) => {
+  // If Baileys is enabled, prefer Baileys QR code
+  if (BAILEYS_ENABLED) {
+    const baileysQR = baileysService.getQRCode();
+    if (baileysQR.available) {
+      return res.json({
+        available: true,
+        base64: baileysQR.base64,
+        source: 'baileys'
+      });
+    }
+  }
   res.json(connectionService.getQRCode());
+});
+
+// ============ BAILEYS ENDPOINTS ============
+
+// Get Baileys status
+app.get('/api/baileys/status', (req, res) => {
+  res.json(baileysService.getStatus());
+});
+
+// Connect Baileys
+app.post('/api/baileys/connect', async (req, res) => {
+  if (!BAILEYS_ENABLED) {
+    return res.status(400).json({ error: 'Baileys mode is not enabled. Set BAILEYS_ENABLED=true' });
+  }
+
+  try {
+    const result = await baileysService.connect();
+    res.json({ success: result, message: result ? 'Connecting...' : 'Failed to start connection' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Disconnect Baileys
+app.post('/api/baileys/disconnect', async (req, res) => {
+  try {
+    await baileysService.disconnect();
+    res.json({ success: true, message: 'Disconnected' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Logout and clear session
+app.post('/api/baileys/logout', async (req, res) => {
+  try {
+    await baileysService.disconnect();
+    await baileysService.clearAuthState();
+    res.json({ success: true, message: 'Logged out and session cleared' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Send message via Baileys
+app.post('/api/baileys/send', async (req, res) => {
+  if (!BAILEYS_ENABLED) {
+    return res.status(400).json({ error: 'Baileys mode is not enabled' });
+  }
+
+  const { to, message } = req.body;
+
+  if (!to || !message) {
+    return res.status(400).json({ error: 'Missing required fields: to, message' });
+  }
+
+  try {
+    const result = await baileysService.sendMessage(to, message);
+    res.json({ success: true, messageId: result.key.id });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Get configuration
@@ -847,23 +939,47 @@ async function startServer() {
   await messageStore.load();
   messageStore.startAutoSave();
 
-  // Initialize webhook service
-  webhookService.init(config.webhookUrl);
+  // Initialize webhook service (only if URL is configured)
+  if (config.webhookUrl) {
+    webhookService.init(config.webhookUrl);
+  }
+
+  // Initialize Baileys if enabled
+  if (BAILEYS_ENABLED) {
+    baileysEvents.initialize();
+    // Auto-connect Baileys on startup
+    baileysEvents.start().catch(err => {
+      logger.error('Failed to auto-start Baileys', { error: err.message });
+    });
+  }
 
   app.listen(PORT, '0.0.0.0', () => {
     logger.info('WhatsApp Filter Server started', {
       version: VERSION,
       port: PORT,
+      baileysEnabled: BAILEYS_ENABLED,
       contacts: config.allowedNumbers?.length || 0,
       groups: config.allowedGroups?.length || 0
     });
 
     console.log(`WhatsApp Filter Server v${VERSION}`);
     console.log(`Server running on port ${PORT}`);
-    console.log(`Filter endpoint: http://localhost:${PORT}/filter`);
-    console.log(`Filter with event: http://localhost:${PORT}/filter/:event`);
+    console.log(`Mode: ${BAILEYS_ENABLED ? 'BAILEYS (Direct WhatsApp)' : 'Evolution API (Webhook)'}`);
+
+    if (BAILEYS_ENABLED) {
+      console.log(`Baileys: Enabled - will connect automatically`);
+      console.log(`QR Code: http://localhost:${PORT} (check UI for QR)`);
+    } else {
+      console.log(`Filter endpoint: http://localhost:${PORT}/filter`);
+      console.log(`Filter with event: http://localhost:${PORT}/filter/:event`);
+    }
+
     console.log(`Admin UI: http://localhost:${PORT}`);
-    console.log(`Webhook target: ${config.webhookUrl}`);
+
+    if (config.webhookUrl) {
+      console.log(`Webhook target: ${config.webhookUrl}`);
+    }
+
     console.log(`Contacts: ${config.allowedNumbers?.length || 0}`);
     console.log(`Groups: ${config.allowedGroups?.length || 0}`);
 
@@ -879,6 +995,9 @@ async function startServer() {
 // Graceful shutdown
 process.on('SIGTERM', async () => {
   logger.info('Received SIGTERM, shutting down gracefully');
+  if (BAILEYS_ENABLED) {
+    await baileysEvents.stop();
+  }
   await saveConfig();
   await statsService.save();
   await messageStore.save();
@@ -887,6 +1006,9 @@ process.on('SIGTERM', async () => {
 
 process.on('SIGINT', async () => {
   logger.info('Received SIGINT, shutting down gracefully');
+  if (BAILEYS_ENABLED) {
+    await baileysEvents.stop();
+  }
   await saveConfig();
   await statsService.save();
   await messageStore.save();

@@ -158,16 +158,35 @@ async function handleUpsert(payload, context) {
     return { action: 'filtered', reason };
   }
 
-  // Store the message for later retrieval (only for personal messages, not groups)
-  if (sourceType === 'personal') {
-    try {
-      const messageContent = extractMessageContent(data);
-      messageStore.storeMessage(sourceId, messageContent);
-      logger.debug('Message stored', { phone: sourceId, type: messageContent.type });
-    } catch (storeError) {
-      logger.error('Failed to store message', { error: storeError.message });
-      // Don't fail the whole operation if storage fails
-    }
+  // Store the message for later retrieval (all allowed messages - personal and groups)
+  try {
+    const messageContent = extractMessageContent(data);
+    messageStore.storeMessage(sourceId, messageContent);
+    logger.debug('Message stored', { source: sourceId, sourceType, type: messageContent.type });
+  } catch (storeError) {
+    logger.error('Failed to store message', { error: storeError.message });
+    // Don't fail the whole operation if storage fails
+  }
+
+  // Check if webhook is configured
+  const webhookHealth = webhookService.getHealth();
+
+  // If no webhook configured, just mark as stored (Baileys-only mode)
+  if (!webhookHealth.configured) {
+    statsService.increment('MESSAGES_UPSERT', 'forwarded'); // Count as success
+    statsService.logEvent({
+      event: 'MESSAGES_UPSERT',
+      source: sourceId,
+      sourceType,
+      senderName,
+      action: 'stored',
+      details: {
+        messageType: data.message?.conversation ? 'text' : 'media',
+        mode: 'baileys-only'
+      }
+    });
+    logger.filter(sourceId, true, sourceType);
+    return { action: 'stored', source: sourceId, sourceType };
   }
 
   // Forward to n8n
@@ -286,18 +305,21 @@ async function handleSend(payload, context) {
   const remoteJid = data.key?.remoteJid || '';
   const { sourceId, sourceType } = parseRemoteJid(remoteJid);
 
-  if (sourceType === 'personal' && sourceId) {
+  // Store outgoing message (personal and groups)
+  if (sourceId) {
     try {
       const messageContent = extractMessageContent(data);
       messageContent.fromMe = true; // Mark as outgoing
       messageStore.storeMessage(sourceId, messageContent);
-      logger.debug('Outgoing message stored', { phone: sourceId, type: messageContent.type });
+      logger.debug('Outgoing message stored', { source: sourceId, sourceType, type: messageContent.type });
     } catch (storeError) {
       logger.error('Failed to store outgoing message', { error: storeError.message });
     }
   }
 
-  if (process.env.ENABLE_OUTGOING_MESSAGES === 'true') {
+  // Check if webhook forwarding is enabled and configured
+  const webhookHealth = webhookService.getHealth();
+  if (process.env.ENABLE_OUTGOING_MESSAGES === 'true' && webhookHealth.configured) {
     try {
       await webhookService.forward(payload, { event: 'SEND_MESSAGE' });
       statsService.increment('SEND_MESSAGE', 'forwarded');
@@ -315,9 +337,9 @@ async function handleSend(payload, context) {
 
   statsService.logEvent({
     event: 'SEND_MESSAGE',
-    action: 'logged'
+    action: 'stored'
   });
-  return { action: 'logged' };
+  return { action: 'stored' };
 }
 
 module.exports = {
