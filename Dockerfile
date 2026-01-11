@@ -1,4 +1,4 @@
-FROM node:18-alpine
+FROM node:20-alpine
 
 # Install dependencies for Baileys (canvas/sharp support)
 RUN apk add --no-cache \
