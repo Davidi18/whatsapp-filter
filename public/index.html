@@ -1501,18 +1501,41 @@
                 const timeStr = time.toLocaleTimeString('en-US', { hour12: false });
                 const actionText = (e.action || 'logged').toUpperCase();
                 const senderDisplay = e.senderName || e.source || '-';
-                const sourceDisplay = e.senderName && e.source ? e.source : '';
+                const messagePreview = e.messagePreview || '';
+                const msgTypeIcon = getMessageTypeIcon(e.messageType);
 
                 return `
-                    <div class="event-item">
+                    <div class="event-item" style="flex-wrap: wrap;">
                         <span class="event-time">${timeStr}</span>
                         <span class="event-action ${e.action || 'logged'}">${actionText}</span>
                         <span class="event-type">${e.event}</span>
-                        <span class="event-sender" title="${e.senderName || ''}">${senderDisplay}</span>
-                        ${sourceDisplay ? `<span class="event-source">${sourceDisplay}</span>` : ''}
+                        <span class="event-sender" title="${e.source || ''}">${msgTypeIcon} ${senderDisplay}</span>
+                        ${messagePreview ? `<span class="event-message" style="width: 100%; margin-top: 5px; padding-left: 72px; opacity: 0.7; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">"${escapeHtml(messagePreview)}"</span>` : ''}
                     </div>
                 `;
             }).join('');
+        }
+
+        // Get icon for message type
+        function getMessageTypeIcon(type) {
+            const icons = {
+                'text': '💬',
+                'image': '🖼️',
+                'video': '🎥',
+                'audio': '🎵',
+                'document': '📄',
+                'sticker': '🎨',
+                'contact': '👤',
+                'location': '📍'
+            };
+            return icons[type] || '';
+        }
+
+        // Escape HTML to prevent XSS
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
         }
 
         // Refresh events
