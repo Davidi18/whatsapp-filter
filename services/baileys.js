@@ -154,7 +154,9 @@ async function connect() {
 
     // Handle incoming messages
     socket.ev.on('messages.upsert', async ({ messages, type }) => {
-      if (type !== 'notify') return;
+      // Handle both 'notify' (real-time) and 'append' (sync/reconnect) messages
+      // Skip 'prepend' as those are old historical messages
+      if (type !== 'notify' && type !== 'append') return;
 
       for (const msg of messages) {
         // Skip status broadcasts
