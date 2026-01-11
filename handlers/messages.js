@@ -159,14 +159,19 @@ async function handleUpsert(payload, context) {
   }
 
   // Store the message for later retrieval (all allowed messages - personal and groups)
+  const messageContent = extractMessageContent(data);
   try {
-    const messageContent = extractMessageContent(data);
     messageStore.storeMessage(sourceId, messageContent);
     logger.debug('Message stored', { source: sourceId, sourceType, type: messageContent.type });
   } catch (storeError) {
     logger.error('Failed to store message', { error: storeError.message });
     // Don't fail the whole operation if storage fails
   }
+
+  // Create preview of message (truncate if too long)
+  const messagePreview = messageContent.body.length > 50
+    ? messageContent.body.substring(0, 50) + '...'
+    : messageContent.body;
 
   // Check if webhook is configured
   const webhookHealth = webhookService.getHealth();
@@ -180,10 +185,8 @@ async function handleUpsert(payload, context) {
       sourceType,
       senderName,
       action: 'stored',
-      details: {
-        messageType: data.message?.conversation ? 'text' : 'media',
-        mode: 'baileys-only'
-      }
+      messagePreview,
+      messageType: messageContent.type
     });
     logger.filter(sourceId, true, sourceType);
     return { action: 'stored', source: sourceId, sourceType };
@@ -204,9 +207,8 @@ async function handleUpsert(payload, context) {
       sourceType,
       senderName,
       action: 'forwarded',
-      details: {
-        messageType: data.message?.conversation ? 'text' : 'media'
-      }
+      messagePreview,
+      messageType: messageContent.type
     });
     logger.filter(sourceId, true, sourceType);
 
@@ -219,6 +221,8 @@ async function handleUpsert(payload, context) {
       sourceType,
       senderName,
       action: 'failed',
+      messagePreview,
+      messageType: messageContent.type,
       error: error.message
     });
 
@@ -305,11 +309,22 @@ async function handleSend(payload, context) {
   const remoteJid = data.key?.remoteJid || '';
   const { sourceId, sourceType } = parseRemoteJid(remoteJid);
 
+  // Extract message content
+  const messageContent = extractMessageContent(data);
+  messageContent.fromMe = true; // Mark as outgoing
+
+  // Create preview of message
+  const messagePreview = messageContent.body.length > 50
+    ? messageContent.body.substring(0, 50) + '...'
+    : messageContent.body;
+
+  // Find recipient name from config
+  const recipientConfig = config?.allowedNumbers?.find(c => normalizePhone(c.phone) === normalizePhone(sourceId));
+  const recipientName = recipientConfig?.name || sourceId;
+
   // Store outgoing message (personal and groups)
   if (sourceId) {
     try {
-      const messageContent = extractMessageContent(data);
-      messageContent.fromMe = true; // Mark as outgoing
       messageStore.storeMessage(sourceId, messageContent);
       logger.debug('Outgoing message stored', { source: sourceId, sourceType, type: messageContent.type });
     } catch (storeError) {
@@ -325,7 +340,12 @@ async function handleSend(payload, context) {
       statsService.increment('SEND_MESSAGE', 'forwarded');
       statsService.logEvent({
         event: 'SEND_MESSAGE',
-        action: 'forwarded'
+        source: sourceId,
+        sourceType,
+        senderName: 'Me → ' + recipientName,
+        action: 'forwarded',
+        messagePreview,
+        messageType: messageContent.type
       });
       return { action: 'forwarded' };
     } catch (error) {
@@ -337,7 +357,12 @@ async function handleSend(payload, context) {
 
   statsService.logEvent({
     event: 'SEND_MESSAGE',
-    action: 'stored'
+    source: sourceId,
+    sourceType,
+    senderName: 'Me → ' + recipientName,
+    action: 'stored',
+    messagePreview,
+    messageType: messageContent.type
   });
   return { action: 'stored' };
 }
