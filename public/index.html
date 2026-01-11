@@ -770,6 +770,93 @@
             align-items: center;
             gap: 10px;
         }
+
+        /* Baileys QR Code Section */
+        .qr-section {
+            text-align: center;
+            padding: 30px;
+        }
+
+        .qr-container {
+            display: inline-block;
+            padding: 20px;
+            background: #0d1b2a;
+            border: 2px solid #00ff9f;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+
+        .qr-container img {
+            display: block;
+            width: 256px;
+            height: 256px;
+        }
+
+        .qr-instructions {
+            margin-top: 15px;
+            font-size: 12px;
+            opacity: 0.8;
+            line-height: 1.6;
+        }
+
+        .baileys-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .baileys-status.connected {
+            background: rgba(0, 255, 159, 0.2);
+            border: 1px solid #00ff9f;
+            color: #00ff9f;
+        }
+
+        .baileys-status.disconnected {
+            background: rgba(255, 71, 87, 0.2);
+            border: 1px solid #ff4757;
+            color: #ff4757;
+        }
+
+        .baileys-status.waiting_qr {
+            background: rgba(255, 165, 0, 0.2);
+            border: 1px solid #ffa500;
+            color: #ffa500;
+        }
+
+        .baileys-status.connecting {
+            background: rgba(255, 165, 0, 0.2);
+            border: 1px solid #ffa500;
+            color: #ffa500;
+        }
+
+        .baileys-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 20px;
+        }
+
+        .mode-badge {
+            font-size: 10px;
+            padding: 3px 8px;
+            border-radius: 3px;
+            margin-left: 10px;
+        }
+
+        .mode-badge.baileys {
+            background: #00ff9f;
+            color: #0d1b2a;
+        }
+
+        .mode-badge.evolution {
+            background: #ffa500;
+            color: #0d1b2a;
+        }
     </style>
 </head>
 <body>
@@ -797,6 +884,30 @@
         </div>
 
         <div class="content">
+            <!-- Baileys QR Code Section (shown when Baileys mode and needs QR) -->
+            <div class="section hidden" id="baileysSection">
+                <div class="section-header">
+                    <span>WHATSAPP CONNECTION</span>
+                    <span class="baileys-status" id="baileysStatusBadge">CHECKING</span>
+                </div>
+                <div class="section-content">
+                    <div class="qr-section" id="qrSection">
+                        <div id="qrDisplay">
+                            <div class="empty-state">
+                                <div>INITIALIZING...</div>
+                            </div>
+                        </div>
+                        <div class="qr-instructions" id="qrInstructions">
+                            Open WhatsApp on your phone > Settings > Linked Devices > Link a Device
+                        </div>
+                        <div class="baileys-actions">
+                            <button class="btn btn-small" onclick="reconnectBaileys()">RECONNECT</button>
+                            <button class="btn btn-small" onclick="logoutBaileys()" style="border-color: #ff4757; color: #ff4757;">LOGOUT</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Connection Banner -->
             <div class="connection-banner status-unknown" id="connectionBanner">
                 <span class="status-dot"></span>
@@ -1099,6 +1210,139 @@
         let contacts = [];
         let groups = [];
         let stats = { totalMessages: 0, filteredMessages: 0, allowedMessages: 0 };
+        let baileysMode = false;
+        let baileysStatus = 'unknown';
+
+        // ============ BAILEYS FUNCTIONS ============
+
+        async function loadBaileysStatus() {
+            try {
+                const response = await authFetch('/api/baileys/status');
+                if (response.ok) {
+                    const data = await response.json();
+                    baileysMode = data.enabled;
+                    baileysStatus = data.status;
+
+                    updateBaileysUI(data);
+                }
+            } catch (error) {
+                console.error('Failed to load Baileys status:', error);
+            }
+        }
+
+        function updateBaileysUI(data) {
+            const section = document.getElementById('baileysSection');
+            const badge = document.getElementById('baileysStatusBadge');
+            const qrDisplay = document.getElementById('qrDisplay');
+            const instructions = document.getElementById('qrInstructions');
+
+            if (!data.enabled) {
+                section.classList.add('hidden');
+                return;
+            }
+
+            section.classList.remove('hidden');
+
+            // Update status badge
+            badge.className = `baileys-status ${data.status}`;
+            badge.textContent = data.status.toUpperCase().replace('_', ' ');
+
+            // Update QR display based on status
+            if (data.status === 'connected') {
+                qrDisplay.innerHTML = `
+                    <div class="empty-state" style="color: #00ff9f;">
+                        <div style="font-size: 48px; margin-bottom: 15px;">&#10004;</div>
+                        <div>CONNECTED</div>
+                        <div style="font-size: 14px; margin-top: 10px; opacity: 0.8;">
+                            ${data.phoneNumber ? '+' + data.phoneNumber : ''}
+                        </div>
+                    </div>
+                `;
+                instructions.textContent = 'WhatsApp is connected and ready to receive messages.';
+            } else if (data.status === 'waiting_qr' && data.hasQRCode) {
+                loadQRCode();
+                instructions.textContent = 'Scan this QR code with WhatsApp to connect.';
+            } else if (data.status === 'connecting') {
+                qrDisplay.innerHTML = `
+                    <div class="empty-state">
+                        <div class="blink">CONNECTING...</div>
+                    </div>
+                `;
+                instructions.textContent = 'Establishing connection to WhatsApp...';
+            } else if (data.status === 'disconnected') {
+                qrDisplay.innerHTML = `
+                    <div class="empty-state" style="color: #ff4757;">
+                        <div style="font-size: 48px; margin-bottom: 15px;">&#10006;</div>
+                        <div>DISCONNECTED</div>
+                    </div>
+                `;
+                instructions.textContent = 'Click RECONNECT to establish a new connection.';
+            } else {
+                qrDisplay.innerHTML = `
+                    <div class="empty-state">
+                        <div>INITIALIZING...</div>
+                    </div>
+                `;
+            }
+        }
+
+        async function loadQRCode() {
+            try {
+                const response = await authFetch('/api/qrcode');
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.available && data.base64) {
+                        document.getElementById('qrDisplay').innerHTML = `
+                            <div class="qr-container">
+                                <img src="${data.base64}" alt="QR Code" />
+                            </div>
+                        `;
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to load QR code:', error);
+            }
+        }
+
+        async function reconnectBaileys() {
+            try {
+                showToast('RECONNECTING...');
+                const response = await authFetch('/api/baileys/connect', {
+                    method: 'POST'
+                });
+
+                if (response.ok) {
+                    showToast('CONNECTING TO WHATSAPP');
+                    setTimeout(loadBaileysStatus, 2000);
+                } else {
+                    const error = await response.json();
+                    showToast(error.error || 'FAILED TO CONNECT', 'error');
+                }
+            } catch (error) {
+                showToast('CONNECTION ERROR', 'error');
+            }
+        }
+
+        async function logoutBaileys() {
+            if (!confirm('Are you sure you want to logout? You will need to scan the QR code again.')) {
+                return;
+            }
+
+            try {
+                const response = await authFetch('/api/baileys/logout', {
+                    method: 'POST'
+                });
+
+                if (response.ok) {
+                    showToast('LOGGED OUT');
+                    setTimeout(loadBaileysStatus, 1000);
+                } else {
+                    showToast('LOGOUT FAILED', 'error');
+                }
+            } catch (error) {
+                showToast('LOGOUT ERROR', 'error');
+            }
+        }
 
         // Toggle section collapse
         function toggleSection(header) {
@@ -1155,8 +1399,11 @@
                     document.getElementById('totalContacts').textContent = data.stats?.totalContacts || contacts.length;
                     document.getElementById('totalGroups').textContent = data.stats?.totalGroups || groups.length;
 
-                    // Update connection status
-                    updateConnectionBanner(data.connection);
+                    // Update connection status with mode
+                    updateConnectionBanner(data.connection, data.mode);
+
+                    // Update mode in UI if changed
+                    baileysMode = data.mode === 'baileys';
                 }
             } catch (error) {
                 document.getElementById('uptime').textContent = '--:--:--';
@@ -1164,23 +1411,36 @@
         }
 
         // Update connection banner
-        function updateConnectionBanner(conn) {
+        function updateConnectionBanner(conn, mode) {
             if (!conn) return;
 
             const banner = document.getElementById('connectionBanner');
-            const status = conn.status || 'unknown';
+            let status = conn.status || 'unknown';
+
+            // Map Baileys statuses
+            if (status === 'waiting_qr') status = 'connecting';
 
             banner.className = `connection-banner status-${status}`;
 
-            // Show friendly text for unknown status
-            if (status === 'unknown') {
-                document.getElementById('connStatus').textContent = 'AWAITING STATUS';
-                document.getElementById('connSince').textContent = 'Waiting for Evolution API...';
+            // Show friendly text based on mode
+            if (mode === 'baileys') {
+                if (status === 'unknown' || status === 'disconnected') {
+                    document.getElementById('connStatus').textContent = 'AWAITING CONNECTION';
+                    document.getElementById('connSince').textContent = 'Check QR code section above';
+                } else {
+                    document.getElementById('connStatus').textContent = status.toUpperCase();
+                    document.getElementById('connSince').textContent = 'Baileys Direct Connection';
+                }
             } else {
-                document.getElementById('connStatus').textContent = status.toUpperCase();
-                if (conn.statusSince) {
-                    const since = new Date(conn.statusSince);
-                    document.getElementById('connSince').textContent = `Since: ${since.toLocaleString()}`;
+                if (status === 'unknown') {
+                    document.getElementById('connStatus').textContent = 'AWAITING STATUS';
+                    document.getElementById('connSince').textContent = 'Waiting for Evolution API...';
+                } else {
+                    document.getElementById('connStatus').textContent = status.toUpperCase();
+                    if (conn.statusSince) {
+                        const since = new Date(conn.statusSince);
+                        document.getElementById('connSince').textContent = `Since: ${since.toLocaleString()}`;
+                    }
                 }
             }
 
@@ -1589,12 +1849,14 @@
             loadSystemInfo();
             loadRecentEvents();
             loadEventStats();
+            loadBaileysStatus();
 
             // Auto-refresh data every 5 seconds
             refreshIntervals.push(setInterval(() => {
                 if (getAuthToken()) {
                     loadSystemInfo();
                     loadRecentEvents();
+                    loadBaileysStatus();
                 }
             }, 5000));
 

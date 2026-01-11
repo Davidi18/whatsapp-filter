@@ -1,7 +1,7 @@
 {
   "name": "whatsapp-filter",
-  "version": "2.0.0",
-  "description": "WhatsApp message filter with multi-event support, alerts, and retro UI",
+  "version": "2.1.0",
+  "description": "WhatsApp message filter with Baileys integration, multi-event support, alerts, and retro UI",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -12,7 +12,10 @@
     "axios": "^1.6.2",
     "cors": "^2.8.5",
     "helmet": "^7.1.0",
-    "express-rate-limit": "^7.1.5"
+    "express-rate-limit": "^7.1.5",
+    "@whiskeysockets/baileys": "^6.7.16",
+    "qrcode": "^1.5.4",
+    "pino": "^9.6.0"
   },
   "engines": {
     "node": ">=18.0.0",

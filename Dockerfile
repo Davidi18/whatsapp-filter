@@ -1,5 +1,12 @@
 FROM node:18-alpine
 
+# Install dependencies for Baileys (canvas/sharp support)
+RUN apk add --no-cache \
+    libc6-compat \
+    python3 \
+    make \
+    g++
+
 WORKDIR /app
 
 # Copy package files
@@ -11,8 +18,8 @@ RUN npm install --production
 # Copy application code
 COPY . .
 
-# Create config directory
-RUN mkdir -p config
+# Create config directories
+RUN mkdir -p config config/baileys_auth
 
 # Declare volume for persistent data
 VOLUME ["/app/config"]

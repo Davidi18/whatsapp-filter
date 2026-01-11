@@ -8,14 +8,21 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      - ./data:/app/config  # Persistent storage for contacts and stats
+      - ./data:/app/config  # Persistent storage for contacts, stats, and Baileys auth
     environment:
       - PORT=3000
-      - WEBHOOK_URL=${WEBHOOK_URL}
+      # Baileys Mode (Direct WhatsApp connection)
+      - BAILEYS_ENABLED=${BAILEYS_ENABLED:-false}
+      # Webhook URL (optional if BAILEYS_ENABLED=true)
+      - WEBHOOK_URL=${WEBHOOK_URL:-}
       - ADMIN_USERNAME=${ADMIN_USERNAME}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD}
       - ALERTS_WEBHOOK_URL=${ALERTS_WEBHOOK_URL:-}
       - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-}
+      - SECONDARY_WEBHOOK_URL=${SECONDARY_WEBHOOK_URL:-}
       - INSTANCE_NAME=${INSTANCE_NAME:-main}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - NODE_ENV=production
+      # Feature flags
+      - ENABLE_MESSAGE_UPDATES=${ENABLE_MESSAGE_UPDATES:-false}
+      - ENABLE_OUTGOING_MESSAGES=${ENABLE_OUTGOING_MESSAGES:-false}
