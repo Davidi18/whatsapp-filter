@@ -1,12 +1,19 @@
 /**
  * Webhook service for forwarding messages to n8n and secondary endpoints
+ * Supports per-type webhook routing
  */
 
 const axios = require('axios');
 const logger = require('../utils/logger');
 
-let webhookUrl = process.env.WEBHOOK_URL;
+// Default webhook URL
+let defaultWebhookUrl = process.env.WEBHOOK_URL || '';
 let secondaryWebhookUrl = process.env.SECONDARY_WEBHOOK_URL;
+
+// Per-type webhook URLs: { TYPE_NAME: 'https://...' }
+let typeWebhooks = {};
+
+// Stats tracking
 let lastSuccess = null;
 let lastError = null;
 let consecutiveFailures = 0;
@@ -18,12 +25,15 @@ let secondaryStats = {
   consecutiveFailures: 0
 };
 
+// Per-type stats
+let typeStats = {};
+
 /**
  * Initialize webhook service
  */
 function init(url, secondaryUrl) {
-  if (url) {
-    webhookUrl = url;
+  if (url !== undefined) {
+    defaultWebhookUrl = url || '';
   }
   if (secondaryUrl) {
     secondaryWebhookUrl = secondaryUrl;
@@ -37,10 +47,37 @@ function init(url, secondaryUrl) {
 }
 
 /**
- * Get webhook URL
+ * Set type-specific webhooks
+ * @param {Object} webhooks - Map of type to webhook URL, e.g., { VIP: 'https://...', BUSINESS: 'https://...' }
+ */
+function setTypeWebhooks(webhooks) {
+  typeWebhooks = webhooks || {};
+  logger.info('Type webhooks configured', { types: Object.keys(typeWebhooks) });
+}
+
+/**
+ * Get webhook URL for a specific type
+ * Falls back to default if no type-specific webhook exists
+ */
+function getWebhookForType(entityType) {
+  if (entityType && typeWebhooks[entityType]) {
+    return typeWebhooks[entityType];
+  }
+  return defaultWebhookUrl;
+}
+
+/**
+ * Get default webhook URL
  */
 function getUrl() {
-  return webhookUrl;
+  return defaultWebhookUrl;
+}
+
+/**
+ * Get all type webhooks
+ */
+function getTypeWebhooks() {
+  return { ...typeWebhooks };
 }
 
 /**
@@ -48,12 +85,16 @@ function getUrl() {
  */
 function getHealth() {
   return {
-    url: webhookUrl,
-    configured: !!webhookUrl,
+    url: defaultWebhookUrl,
+    configured: !!defaultWebhookUrl || Object.keys(typeWebhooks).length > 0,
     healthy: consecutiveFailures === 0,
     lastSuccess,
     lastError,
     consecutiveFailures,
+    typeWebhooks: Object.keys(typeWebhooks).length > 0 ? {
+      configured: Object.keys(typeWebhooks),
+      stats: typeStats
+    } : null,
     secondary: secondaryWebhookUrl ? {
       url: secondaryWebhookUrl,
       configured: true,
@@ -71,7 +112,7 @@ function getHealth() {
 async function forwardToSecondary(payload, metadata) {
   if (!secondaryWebhookUrl) return;
 
-  const { sourceId = '', sourceType = 'unknown', event = 'MESSAGES_UPSERT' } = metadata;
+  const { sourceId = '', sourceType = 'unknown', event = 'MESSAGES_UPSERT', entityType = '' } = metadata;
 
   try {
     await axios.post(secondaryWebhookUrl, payload, {
@@ -81,6 +122,7 @@ async function forwardToSecondary(payload, metadata) {
         'X-Filter-Source': 'whatsapp-filter',
         'X-Source-Id': sourceId,
         'X-Source-Type': sourceType,
+        'X-Entity-Type': entityType,
         'X-Event-Type': event
       }
     });
@@ -108,30 +150,35 @@ async function forwardToSecondary(payload, metadata) {
 }
 
 /**
- * Forward message/event to n8n webhook (and secondary if configured)
+ * Forward message/event to webhook (with type-based routing)
  */
 async function forward(payload, metadata = {}) {
-  if (!webhookUrl) {
-    throw new Error('No webhook URL configured');
-  }
-
   const {
     sourceId = '',
     sourceType = 'unknown',
-    event = 'MESSAGES_UPSERT'
+    event = 'MESSAGES_UPSERT',
+    entityType = ''
   } = metadata;
+
+  // Get webhook URL based on entity type
+  const targetUrl = getWebhookForType(entityType);
+
+  if (!targetUrl) {
+    throw new Error('No webhook URL configured');
+  }
 
   // Forward to secondary webhook (non-blocking)
   forwardToSecondary(payload, metadata).catch(() => {});
 
   try {
-    await axios.post(webhookUrl, payload, {
+    await axios.post(targetUrl, payload, {
       timeout: 5000,
       headers: {
         'Content-Type': 'application/json',
         'X-Filter-Source': 'whatsapp-filter',
         'X-Source-Id': sourceId,
         'X-Source-Type': sourceType,
+        'X-Entity-Type': entityType,
         'X-Event-Type': event
       }
     });
@@ -140,9 +187,24 @@ async function forward(payload, metadata = {}) {
     consecutiveFailures = 0;
     lastError = null;
 
-    logger.debug('Message forwarded to webhook', { sourceId, sourceType, event });
+    // Track type-specific stats
+    if (entityType) {
+      if (!typeStats[entityType]) {
+        typeStats[entityType] = { successes: 0, failures: 0, lastSuccess: null };
+      }
+      typeStats[entityType].successes++;
+      typeStats[entityType].lastSuccess = lastSuccess;
+    }
 
-    return { success: true };
+    logger.debug('Message forwarded to webhook', {
+      sourceId,
+      sourceType,
+      entityType,
+      event,
+      usedTypeWebhook: entityType && typeWebhooks[entityType] ? true : false
+    });
+
+    return { success: true, usedUrl: targetUrl };
   } catch (error) {
     consecutiveFailures++;
     lastError = {
@@ -151,9 +213,19 @@ async function forward(payload, metadata = {}) {
       code: error.code || error.response?.status
     };
 
+    // Track type-specific failures
+    if (entityType) {
+      if (!typeStats[entityType]) {
+        typeStats[entityType] = { successes: 0, failures: 0, lastError: null };
+      }
+      typeStats[entityType].failures++;
+      typeStats[entityType].lastError = lastError;
+    }
+
     logger.error('Failed to forward message', {
       sourceId,
       sourceType,
+      entityType,
       event,
       error: error.message,
       consecutiveFailures
@@ -166,8 +238,10 @@ async function forward(payload, metadata = {}) {
 /**
  * Test webhook connection
  */
-async function test() {
-  if (!webhookUrl) {
+async function test(entityType = null) {
+  const targetUrl = entityType ? getWebhookForType(entityType) : defaultWebhookUrl;
+
+  if (!targetUrl) {
     return { success: false, error: 'No webhook URL configured' };
   }
 
@@ -175,27 +249,30 @@ async function test() {
     test: true,
     timestamp: new Date().toISOString(),
     message: 'WhatsApp Filter webhook test',
-    source: 'whatsapp-filter'
+    source: 'whatsapp-filter',
+    entityType: entityType || 'default'
   };
 
   try {
-    await axios.post(webhookUrl, testPayload, {
+    await axios.post(targetUrl, testPayload, {
       timeout: 5000,
       headers: {
         'Content-Type': 'application/json',
-        'X-Filter-Source': 'whatsapp-filter-test'
+        'X-Filter-Source': 'whatsapp-filter-test',
+        'X-Entity-Type': entityType || 'default'
       }
     });
 
     lastSuccess = new Date().toISOString();
     consecutiveFailures = 0;
 
-    return { success: true };
+    return { success: true, testedUrl: targetUrl };
   } catch (error) {
     return {
       success: false,
       error: error.message,
-      code: error.code || error.response?.status
+      code: error.code || error.response?.status,
+      testedUrl: targetUrl
     };
   }
 }
@@ -207,6 +284,7 @@ function resetStats() {
   lastSuccess = null;
   lastError = null;
   consecutiveFailures = 0;
+  typeStats = {};
   secondaryStats = {
     lastSuccess: null,
     lastError: null,
@@ -216,7 +294,10 @@ function resetStats() {
 
 module.exports = {
   init,
+  setTypeWebhooks,
+  getWebhookForType,
   getUrl,
+  getTypeWebhooks,
   getHealth,
   forward,
   test,

@@ -460,10 +460,14 @@
             letter-spacing: 0.5px;
         }
 
-        .event-badge.forwarded,
-        .event-badge.stored {
+        .event-badge.forwarded {
             background: rgba(0, 255, 159, 0.15);
             color: #00ff9f;
+        }
+
+        .event-badge.stored {
+            background: rgba(0, 200, 255, 0.15);
+            color: #00c8ff;
         }
 
         .event-badge.filtered {
@@ -1002,6 +1006,13 @@
                 <span class="status-since" id="connSince"></span>
             </div>
 
+            <!-- Webhook Warning Banner (hidden by default) -->
+            <div class="connection-banner status-connecting hidden" id="webhookWarning" style="margin-bottom: 15px;">
+                <span style="font-size: 18px;">&#9888;</span>
+                <span class="status-text" style="color: #ffa500;">NO WEBHOOK CONFIGURED</span>
+                <span class="status-phone" style="color: rgba(255,165,0,0.8);">Messages will be stored locally only, not forwarded to n8n</span>
+            </div>
+
             <div class="status-bar">
                 <div class="status-item">
                     STATUS: <span class="blink" id="systemStatus">LOADING</span>
@@ -1053,6 +1064,58 @@
                         <div class="empty-state">
                             <div>NO EVENTS YET</div>
                         </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Webhook Configuration -->
+            <div class="section collapsed" id="webhookSection">
+                <div class="section-header section-toggle" onclick="toggleSection(this)">
+                    <span><span class="toggle-icon">▼</span> WEBHOOK CONFIGURATION</span>
+                    <span id="webhookStatusBadge" class="baileys-status disconnected" style="font-size: 10px; padding: 4px 8px;">NOT SET</span>
+                </div>
+                <div class="section-content">
+                    <div id="webhookEnvWarning" class="hidden" style="background: rgba(255,165,0,0.1); border: 1px solid rgba(255,165,0,0.3); border-radius: 4px; padding: 10px; margin-bottom: 15px; font-size: 11px; color: #ffa500;">
+                        Webhook URL is set via environment variable and cannot be changed from UI
+                    </div>
+                    <div class="add-form" style="grid-template-columns: 1fr auto auto;">
+                        <div class="input-group">
+                            <div class="input-label">WEBHOOK URL (n8n)</div>
+                            <input
+                                type="url"
+                                class="input-field"
+                                placeholder="https://n8n.example.com/webhook/..."
+                                id="webhookUrlInput"
+                            >
+                        </div>
+                        <div class="input-group">
+                            <div class="input-label">&nbsp;</div>
+                            <button class="btn" onclick="saveWebhookUrl()">SAVE</button>
+                        </div>
+                        <div class="input-group">
+                            <div class="input-label">&nbsp;</div>
+                            <button class="btn btn-small" onclick="testWebhook()" style="padding: 12px 15px;">TEST</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Type-Based Webhooks -->
+            <div class="section collapsed" id="typeWebhooksSection">
+                <div class="section-header section-toggle" onclick="toggleSection(this)">
+                    <span><span class="toggle-icon">▼</span> TYPE WEBHOOKS</span>
+                    <span id="typeWebhooksCount" style="font-size: 10px; opacity: 0.7;">0 configured</span>
+                </div>
+                <div class="section-content">
+                    <div style="background: rgba(0,255,159,0.05); border: 1px solid rgba(0,255,159,0.2); border-radius: 4px; padding: 10px; margin-bottom: 15px; font-size: 11px; opacity: 0.8;">
+                        Configure different webhook URLs for different contact/group types. If not set, the default webhook will be used.
+                    </div>
+                    <div id="typeWebhooksList" class="contact-list">
+                        <!-- Populated by JS -->
+                    </div>
+                    <div style="margin-top: 15px; display: flex; gap: 10px;">
+                        <button class="btn" onclick="saveTypeWebhooks()">SAVE ALL</button>
+                        <button class="btn btn-small" onclick="loadTypeWebhooks()" style="padding: 12px 15px;">REFRESH</button>
                     </div>
                 </div>
             </div>
@@ -1145,6 +1208,12 @@
                                 placeholder="GROUP NAME"
                                 id="groupNameInput"
                             >
+                        </div>
+                        <div class="input-group">
+                            <div class="input-label">TYPE</div>
+                            <select class="input-field" id="groupTypeSelect">
+                                <!-- Populated dynamically -->
+                            </select>
                         </div>
                         <div class="input-group">
                             <div class="input-label">&nbsp;</div>
@@ -1321,12 +1390,37 @@
         let stats = { totalMessages: 0, filteredMessages: 0, allowedMessages: 0 };
         let baileysMode = false;
         let baileysStatus = 'unknown';
+        let availableTypes = {
+            contact: ['PERSONAL', 'BUSINESS', 'VIP', 'TEMP'],
+            group: ['GENERAL', 'BUSINESS', 'VIP', 'TEMP']
+        };
+        let typeWebhooks = {};
 
         // Rate limiting for login
         let loginAttempts = 0;
         let loginLockoutUntil = 0;
         const MAX_LOGIN_ATTEMPTS = 5;
         const LOCKOUT_DURATION = 60000; // 1 minute
+
+        // ============ TYPE MANAGEMENT ============
+
+        function populateTypeSelects() {
+            // Populate contact type select
+            const contactTypeSelect = document.getElementById('typeSelect');
+            if (contactTypeSelect) {
+                contactTypeSelect.innerHTML = availableTypes.contact.map(t =>
+                    `<option value="${t}">${t}</option>`
+                ).join('');
+            }
+
+            // Populate group type select
+            const groupTypeSelect = document.getElementById('groupTypeSelect');
+            if (groupTypeSelect) {
+                groupTypeSelect.innerHTML = availableTypes.group.map(t =>
+                    `<option value="${t}">${t}</option>`
+                ).join('');
+            }
+        }
 
         // ============ BAILEYS FUNCTIONS ============
 
@@ -1350,6 +1444,8 @@
             const badge = document.getElementById('baileysStatusBadge');
             const qrDisplay = document.getElementById('qrDisplay');
             const instructions = document.getElementById('qrInstructions');
+            const qrSection = document.getElementById('qrSection');
+            const baileysActions = document.querySelector('.baileys-actions');
 
             if (!data.enabled) {
                 section.classList.add('hidden');
@@ -1364,40 +1460,51 @@
 
             // Update QR display based on status
             if (data.status === 'connected') {
+                // Compact mode when connected - hide QR section content, show minimal info
+                qrSection.style.padding = '15px';
                 qrDisplay.innerHTML = `
-                    <div class="empty-state" style="color: #00ff9f;">
-                        <div style="font-size: 48px; margin-bottom: 15px;">&#10004;</div>
-                        <div>CONNECTED</div>
-                        <div style="font-size: 14px; margin-top: 10px; opacity: 0.8;">
-                            ${data.phoneNumber ? '+' + data.phoneNumber : ''}
-                        </div>
+                    <div style="display: flex; align-items: center; gap: 12px; color: #00ff9f;">
+                        <span style="font-size: 24px;">&#10004;</span>
+                        <span style="font-weight: 600;">WHATSAPP CONNECTED</span>
+                        <span style="opacity: 0.7; font-size: 12px;">${data.phoneNumber ? '+' + data.phoneNumber : ''}</span>
                     </div>
                 `;
-                instructions.textContent = 'WhatsApp is connected and ready to receive messages.';
+                instructions.style.display = 'none';
+                if (baileysActions) baileysActions.style.marginTop = '10px';
             } else if (data.status === 'waiting_qr' && data.hasQRCode) {
+                // Full QR display mode
+                qrSection.style.padding = '30px';
+                instructions.style.display = 'block';
                 loadQRCode();
                 instructions.textContent = 'Scan this QR code with WhatsApp to connect.';
+                if (baileysActions) baileysActions.style.marginTop = '20px';
             } else if (data.status === 'connecting') {
+                qrSection.style.padding = '20px';
                 qrDisplay.innerHTML = `
                     <div class="empty-state">
                         <div class="blink">CONNECTING...</div>
                     </div>
                 `;
+                instructions.style.display = 'block';
                 instructions.textContent = 'Establishing connection to WhatsApp...';
             } else if (data.status === 'disconnected') {
+                qrSection.style.padding = '20px';
                 qrDisplay.innerHTML = `
-                    <div class="empty-state" style="color: #ff4757;">
-                        <div style="font-size: 48px; margin-bottom: 15px;">&#10006;</div>
-                        <div>DISCONNECTED</div>
+                    <div style="display: flex; align-items: center; gap: 12px; color: #ff4757;">
+                        <span style="font-size: 24px;">&#10006;</span>
+                        <span style="font-weight: 600;">DISCONNECTED</span>
                     </div>
                 `;
+                instructions.style.display = 'block';
                 instructions.textContent = 'Click RECONNECT to establish a new connection.';
             } else {
+                qrSection.style.padding = '20px';
                 qrDisplay.innerHTML = `
                     <div class="empty-state">
                         <div>INITIALIZING...</div>
                     </div>
                 `;
+                instructions.style.display = 'block';
             }
         }
 
@@ -1459,9 +1566,218 @@
             }
         }
 
+        // ============ WEBHOOK FUNCTIONS ============
+
+        async function saveWebhookUrl() {
+            const urlInput = document.getElementById('webhookUrlInput');
+            const url = urlInput.value.trim();
+
+            // Validate URL format if not empty
+            if (url) {
+                try {
+                    new URL(url);
+                } catch {
+                    showToast('INVALID URL FORMAT', 'error');
+                    urlInput.focus();
+                    return;
+                }
+            }
+
+            try {
+                const response = await authFetch('/api/webhook', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    showToast(url ? 'WEBHOOK SAVED' : 'WEBHOOK CLEARED');
+                    loadConfig(); // Refresh UI
+                } else {
+                    showToast(data.error || 'SAVE FAILED', 'error');
+                }
+            } catch (error) {
+                showToast('CONNECTION ERROR', 'error');
+            }
+        }
+
+        async function testWebhook() {
+            const urlInput = document.getElementById('webhookUrlInput');
+            if (!urlInput.value.trim()) {
+                showToast('NO WEBHOOK URL SET', 'error');
+                return;
+            }
+
+            showToast('TESTING...');
+
+            try {
+                const response = await authFetch('/api/webhook/test', {
+                    method: 'POST'
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    showToast('WEBHOOK TEST OK');
+                } else {
+                    showToast(`TEST FAILED: ${data.error || 'Unknown error'}`, 'error');
+                }
+            } catch (error) {
+                showToast('TEST FAILED', 'error');
+            }
+        }
+
         // Toggle section collapse
         function toggleSection(header) {
             header.closest('.section').classList.toggle('collapsed');
+        }
+
+        // ============ TYPE WEBHOOKS FUNCTIONS ============
+
+        async function loadTypeWebhooks() {
+            try {
+                const response = await authFetch('/api/webhooks/types');
+                if (response.ok) {
+                    const data = await response.json();
+                    typeWebhooks = data.typeWebhooks || {};
+                    // Also update available types if returned
+                    if (data.availableTypes) {
+                        availableTypes = data.availableTypes;
+                    }
+                    renderTypeWebhooks();
+                }
+            } catch (error) {
+                console.error('Failed to load type webhooks:', error);
+            }
+        }
+
+        function renderTypeWebhooks() {
+            const list = document.getElementById('typeWebhooksList');
+            const countEl = document.getElementById('typeWebhooksCount');
+
+            // Get all unique types from both contacts and groups
+            const allTypes = [...new Set([
+                ...availableTypes.contact,
+                ...availableTypes.group
+            ])];
+
+            // Count configured webhooks
+            const configuredCount = Object.keys(typeWebhooks).filter(t => typeWebhooks[t]).length;
+            if (countEl) countEl.textContent = `${configuredCount} configured`;
+
+            if (allTypes.length === 0) {
+                list.innerHTML = `<div class="empty-state"><div>NO TYPES AVAILABLE</div></div>`;
+                return;
+            }
+
+            list.innerHTML = allTypes.map(type => {
+                const webhookUrl = typeWebhooks[type] || '';
+                const isConfigured = !!webhookUrl;
+                const statusColor = isConfigured ? '#00ff9f' : 'rgba(128,128,128,0.5)';
+                const statusText = isConfigured ? '●' : '○';
+
+                return `
+                    <div class="contact-item" style="grid-template-columns: 100px 1fr auto auto; gap: 10px;">
+                        <div class="contact-type" style="display: flex; align-items: center; gap: 8px;">
+                            <span style="color: ${statusColor}; font-size: 10px;">${statusText}</span>
+                            ${escapeHtml(type)}
+                        </div>
+                        <input
+                            type="url"
+                            class="input-field"
+                            placeholder="https://n8n.example.com/webhook/..."
+                            value="${escapeHtml(webhookUrl)}"
+                            data-type="${escapeHtml(type)}"
+                            id="typeWebhook_${escapeHtml(type)}"
+                            style="padding: 8px 10px; font-size: 12px;"
+                        >
+                        <button class="btn btn-small" onclick="testTypeWebhook('${escapeHtml(type)}')" style="padding: 8px 12px;">TEST</button>
+                        <button class="btn btn-small" onclick="clearTypeWebhook('${escapeHtml(type)}')" style="padding: 8px 12px; border-color: #ff4757; color: #ff4757;">×</button>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function saveTypeWebhooks() {
+            // Collect all webhook URLs from inputs
+            const webhooks = {};
+            const inputs = document.querySelectorAll('[id^="typeWebhook_"]');
+
+            for (const input of inputs) {
+                const type = input.dataset.type;
+                const url = input.value.trim();
+
+                if (url) {
+                    // Validate URL format
+                    try {
+                        new URL(url);
+                        webhooks[type] = url;
+                    } catch {
+                        showToast(`INVALID URL FOR ${type}`, 'error');
+                        input.focus();
+                        return;
+                    }
+                }
+            }
+
+            try {
+                const response = await authFetch('/api/webhooks/types', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ typeWebhooks: webhooks })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    typeWebhooks = webhooks;
+                    renderTypeWebhooks();
+                    showToast('TYPE WEBHOOKS SAVED');
+                } else {
+                    showToast(data.error || 'SAVE FAILED', 'error');
+                }
+            } catch (error) {
+                showToast('CONNECTION ERROR', 'error');
+            }
+        }
+
+        async function testTypeWebhook(type) {
+            const input = document.getElementById(`typeWebhook_${type}`);
+            const url = input?.value?.trim();
+
+            if (!url) {
+                showToast(`NO URL SET FOR ${type}`, 'error');
+                return;
+            }
+
+            showToast(`TESTING ${type}...`);
+
+            try {
+                const response = await authFetch('/api/webhook/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ entityType: type })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    showToast(`${type} WEBHOOK OK`);
+                } else {
+                    showToast(`${type} TEST FAILED: ${data.error || 'Unknown'}`, 'error');
+                }
+            } catch (error) {
+                showToast('TEST FAILED', 'error');
+            }
+        }
+
+        function clearTypeWebhook(type) {
+            const input = document.getElementById(`typeWebhook_${type}`);
+            if (input) {
+                input.value = '';
+            }
         }
 
         // Load data from server
@@ -1473,16 +1789,71 @@
                     contacts = data.contacts || [];
                     groups = data.groups || [];
                     stats = data.stats || stats;
+                    typeWebhooks = data.typeWebhooks || {};
+
+                    // Update available types from server
+                    if (data.types) {
+                        availableTypes = data.types;
+                    }
+
+                    // Populate type select dropdowns
+                    populateTypeSelects();
+
+                    // Update type webhooks list
+                    renderTypeWebhooks();
 
                     renderContacts();
                     renderGroups();
 
                     document.getElementById('systemStatus').textContent = 'ONLINE';
 
-                    if (data.webhookFromEnv) {
-                        document.getElementById('webhookStatus').textContent = 'ENV';
+                    const webhookEl = document.getElementById('webhookStatus');
+                    const webhookWarning = document.getElementById('webhookWarning');
+                    const webhookUrlInput = document.getElementById('webhookUrlInput');
+                    const webhookEnvWarning = document.getElementById('webhookEnvWarning');
+                    const webhookStatusBadge = document.getElementById('webhookStatusBadge');
+
+                    // Update webhook URL input
+                    if (webhookUrlInput) {
+                        webhookUrlInput.value = data.webhookUrl || '';
+                        webhookUrlInput.disabled = data.webhookFromEnv;
+                    }
+
+                    // Show/hide env warning
+                    if (webhookEnvWarning) {
+                        if (data.webhookFromEnv) {
+                            webhookEnvWarning.classList.remove('hidden');
+                        } else {
+                            webhookEnvWarning.classList.add('hidden');
+                        }
+                    }
+
+                    // Update webhook status badge in config section
+                    if (webhookStatusBadge) {
+                        if (data.webhookConfigured) {
+                            webhookStatusBadge.textContent = data.webhookFromEnv ? 'ENV' : 'CONFIGURED';
+                            webhookStatusBadge.className = 'baileys-status connected';
+                        } else {
+                            webhookStatusBadge.textContent = 'NOT SET';
+                            webhookStatusBadge.className = 'baileys-status disconnected';
+                        }
+                    }
+
+                    if (data.webhookConfigured === false) {
+                        webhookEl.textContent = 'NOT SET';
+                        webhookEl.style.color = '#ffa500';
+                        webhookEl.title = 'No webhook URL configured - messages will be stored locally only';
+                        webhookWarning.classList.remove('hidden');
+                    } else if (data.webhookFromEnv) {
+                        webhookEl.textContent = 'ENV';
+                        webhookEl.style.color = '#00ff9f';
+                        webhookEl.title = 'Webhook configured via environment variable';
+                        webhookWarning.classList.add('hidden');
                     } else {
-                        document.getElementById('webhookStatus').textContent = 'SET';
+                        webhookEl.textContent = 'SET';
+                        webhookEl.style.color = '#00ff9f';
+                        webhookEl.title = 'Webhook URL is configured';
+                        webhookWarning.classList.add('hidden');
                     }
                 } else {
                     throw new Error(`HTTP ${response.status}`);
@@ -1629,11 +2000,20 @@
                 const sourceTypeBadge = sourceType === 'group' ? '<span class="source-type-badge group">GROUP</span>' :
                                         sourceType === 'contact' ? '<span class="source-type-badge contact">PRIVATE</span>' : '';
 
+                // Add tooltips for different statuses
+                const actionTitle = {
+                    'forwarded': 'Message was forwarded to webhook (n8n)',
+                    'stored': 'Message saved locally (no webhook configured)',
+                    'filtered': 'Message blocked - sender not in allowed list',
+                    'failed': 'Failed to forward to webhook',
+                    'logged': 'Event logged only'
+                }[action] || '';
+
                 return `
                     <div class="event-card ${sourceTypeClass}">
                         <div class="event-card-header">
                             <span class="event-time">${timeStr}</span>
-                            <span class="event-badge ${action}">${action}</span>
+                            <span class="event-badge ${action}" title="${actionTitle}">${action}</span>
                             ${sourceTypeBadge}
                             <span class="event-type-badge">${eventType}</span>
                         </div>
@@ -1727,9 +2107,10 @@
         }
 
         function validatePhone(phone) {
-            const phoneRegex = /^(\d{10,15}|972[-\s]?[1-9]\d{1}[-\s]?\d{3}[-\s]?\d{4})$/;
-            const cleaned = phone.replace(/[-\s]/g, '');
-            return phoneRegex.test(phone) && cleaned.length >= 10 && cleaned.length <= 15;
+            // Remove all formatting to check length
+            const cleaned = phone.replace(/\D/g, '');
+            // Must be 10-15 digits after removing formatting
+            return cleaned.length >= 10 && cleaned.length <= 15;
         }
 
         function validateName(name) {
@@ -1880,7 +2261,8 @@
                 const term = searchTerm.toLowerCase();
                 filtered = groups.filter(g =>
                     g.groupId.toLowerCase().includes(term) ||
-                    g.name.toLowerCase().includes(term)
+                    g.name.toLowerCase().includes(term) ||
+                    (g.type && g.type.toLowerCase().includes(term))
                 );
             }
 
@@ -1897,10 +2279,12 @@
 
             list.innerHTML = filtered.map((group, index) => {
                 const realIndex = groups.indexOf(group);
+                const typeClass = (group.type || 'GENERAL').toLowerCase();
                 return `
-                    <div class="contact-item" style="grid-template-columns: 1fr 1fr 60px;">
+                    <div class="contact-item" style="grid-template-columns: 1fr 1fr auto 60px;">
                         <div class="contact-number">${escapeHtml(group.groupId)}</div>
                         <div class="contact-name">${escapeHtml(group.name)}</div>
+                        <div class="contact-type ${typeClass}">${escapeHtml(group.type || 'GENERAL')}</div>
                         <button class="remove-btn" onclick="removeGroup(${realIndex})" title="Remove group">×</button>
                     </div>
                 `;
@@ -1910,9 +2294,11 @@
         async function addGroup() {
             const groupIdInput = document.getElementById('groupIdInput');
             const groupNameInput = document.getElementById('groupNameInput');
+            const groupTypeSelect = document.getElementById('groupTypeSelect');
 
             let groupId = groupIdInput.value.trim();
             let name = groupNameInput.value.trim();
+            const type = groupTypeSelect.value;
 
             if (!groupId || !name) {
                 showToast('MISSING DATA', 'error');
@@ -1943,7 +2329,7 @@
                 const response = await authFetch('/api/groups/add', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ groupId, name })
+                    body: JSON.stringify({ groupId, name, type })
                 });
 
                 if (!response.ok) {
@@ -2051,6 +2437,7 @@
             loadRecentEvents();
             loadEventStats();
             loadBaileysStatus();
+            loadTypeWebhooks();
 
             // Auto-refresh data every 5 seconds
             refreshIntervals.push(setInterval(() => {

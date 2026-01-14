@@ -3,21 +3,54 @@
  */
 
 // Phone number validation
-// Accepts: pure digits (10-15 chars) OR Israeli formatted (972-XX-XXX-XXXX)
-const PHONE_REGEX = /^(\d{10,15}|972[-\s]?[1-9]\d{1}[-\s]?\d{3}[-\s]?\d{4})$/;
+// Accepts: international format with optional +, digits with optional formatting
+// Examples: +972547554964, 972-54-755-4964, +972-54-755-4964, 0547554964
+const PHONE_REGEX = /^\+?[\d\s\-()]{10,20}$/;
 
-// Group ID validation (numeric string, typically 18 digits)
-const GROUP_ID_REGEX = /^\d{10,25}$/;
+// Group ID validation (numeric string, typically 18 digits, with optional @g.us suffix)
+const GROUP_ID_REGEX = /^\d{10,25}(@g\.us)?$/;
 
-// Valid contact types
-const VALID_CONTACT_TYPES = ['PERSONAL', 'BUSINESS', 'VIP', 'TEMP'];
+// Default contact/group types
+const DEFAULT_CONTACT_TYPES = ['PERSONAL', 'BUSINESS', 'VIP', 'TEMP'];
+const DEFAULT_GROUP_TYPES = ['GENERAL', 'BUSINESS', 'VIP', 'TEMP'];
+
+// Will be populated from config for custom types
+let customContactTypes = [];
+let customGroupTypes = [];
+
+/**
+ * Set custom types from config
+ */
+function setCustomTypes(contactTypes = [], groupTypes = []) {
+  customContactTypes = contactTypes;
+  customGroupTypes = groupTypes;
+}
+
+/**
+ * Get all valid contact types (default + custom)
+ */
+function getValidContactTypes() {
+  return [...DEFAULT_CONTACT_TYPES, ...customContactTypes];
+}
+
+/**
+ * Get all valid group types (default + custom)
+ */
+function getValidGroupTypes() {
+  return [...DEFAULT_GROUP_TYPES, ...customGroupTypes];
+}
 
 /**
  * Validate phone number format
+ * Accepts various formats: +972547554964, 972-54-755-4964, (054) 755-4964
  */
 function isValidPhone(phone) {
   if (!phone || typeof phone !== 'string') return false;
-  return PHONE_REGEX.test(phone);
+  // Check basic format first
+  if (!PHONE_REGEX.test(phone)) return false;
+  // Check normalized length is 10-15 digits
+  const normalized = normalizePhone(phone);
+  return normalized.length >= 10 && normalized.length <= 15;
 }
 
 /**
@@ -34,7 +67,14 @@ function isValidGroupId(groupId) {
  * Validate contact type
  */
 function isValidContactType(type) {
-  return VALID_CONTACT_TYPES.includes(type);
+  return getValidContactTypes().includes(type);
+}
+
+/**
+ * Validate group type
+ */
+function isValidGroupType(type) {
+  return getValidGroupTypes().includes(type);
 }
 
 /**
@@ -46,11 +86,14 @@ function isValidName(name) {
 }
 
 /**
- * Normalize phone number (remove formatting)
+ * Normalize phone number (remove all formatting)
+ * Removes: +, -, spaces, parentheses, dots
+ * Example: "+972-54-755-4964" -> "972547554964"
  */
 function normalizePhone(phone) {
   if (!phone) return '';
-  return phone.replace(/[-\s]/g, '');
+  // Remove all non-digit characters to ensure consistent comparison
+  return phone.replace(/\D/g, '');
 }
 
 /**
@@ -92,9 +135,14 @@ module.exports = {
   isValidPhone,
   isValidGroupId,
   isValidContactType,
+  isValidGroupType,
   isValidName,
   normalizePhone,
   normalizeGroupId,
   parseRemoteJid,
-  VALID_CONTACT_TYPES
+  setCustomTypes,
+  getValidContactTypes,
+  getValidGroupTypes,
+  DEFAULT_CONTACT_TYPES,
+  DEFAULT_GROUP_TYPES
 };
