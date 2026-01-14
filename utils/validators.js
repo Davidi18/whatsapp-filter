@@ -3,8 +3,9 @@
  */
 
 // Phone number validation
-// Accepts: pure digits (10-15 chars) OR Israeli formatted (972-XX-XXX-XXXX)
-const PHONE_REGEX = /^(\d{10,15}|972[-\s]?[1-9]\d{1}[-\s]?\d{3}[-\s]?\d{4})$/;
+// Accepts: international format with optional +, digits with optional formatting
+// Examples: +972547554964, 972-54-755-4964, +972-54-755-4964, 0547554964
+const PHONE_REGEX = /^\+?[\d\s\-()]{10,20}$/;
 
 // Group ID validation (numeric string, typically 18 digits)
 const GROUP_ID_REGEX = /^\d{10,25}$/;
@@ -14,10 +15,15 @@ const VALID_CONTACT_TYPES = ['PERSONAL', 'BUSINESS', 'VIP', 'TEMP'];
 
 /**
  * Validate phone number format
+ * Accepts various formats: +972547554964, 972-54-755-4964, (054) 755-4964
  */
 function isValidPhone(phone) {
   if (!phone || typeof phone !== 'string') return false;
-  return PHONE_REGEX.test(phone);
+  // Check basic format first
+  if (!PHONE_REGEX.test(phone)) return false;
+  // Check normalized length is 10-15 digits
+  const normalized = normalizePhone(phone);
+  return normalized.length >= 10 && normalized.length <= 15;
 }
 
 /**
@@ -46,11 +52,14 @@ function isValidName(name) {
 }
 
 /**
- * Normalize phone number (remove formatting)
+ * Normalize phone number (remove all formatting)
+ * Removes: +, -, spaces, parentheses, dots
+ * Example: "+972-54-755-4964" -> "972547554964"
  */
 function normalizePhone(phone) {
   if (!phone) return '';
-  return phone.replace(/[-\s]/g, '');
+  // Remove all non-digit characters to ensure consistent comparison
+  return phone.replace(/\D/g, '');
 }
 
 /**

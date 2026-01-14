@@ -32,14 +32,28 @@ function checkAllowed(remoteJid) {
 
   if (sourceType === 'group') {
     const isAllowed = config?.allowedGroups?.some(g => g.groupId === sourceId) || false;
+    logger.debug('Group check', { sourceId, isAllowed, configuredGroups: config?.allowedGroups?.length || 0 });
     return { isAllowed, sourceId, sourceType, reason: isAllowed ? null : 'not_in_allowed_groups' };
   }
 
-  // Personal message
+  // Personal message - normalize both sides for comparison
   const normalizedSourceId = normalizePhone(sourceId);
-  const isAllowed = config?.allowedNumbers?.some(c =>
+  const matchedContact = config?.allowedNumbers?.find(c =>
     normalizePhone(c.phone) === normalizedSourceId
-  ) || false;
+  );
+  const isAllowed = !!matchedContact;
+
+  // Debug logging for phone matching
+  if (!isAllowed && config?.allowedNumbers?.length > 0) {
+    logger.debug('Phone match failed', {
+      incoming: sourceId,
+      normalized: normalizedSourceId,
+      configuredSample: config.allowedNumbers.slice(0, 3).map(c => ({
+        original: c.phone,
+        normalized: normalizePhone(c.phone)
+      }))
+    });
+  }
 
   return { isAllowed, sourceId, sourceType, reason: isAllowed ? null : 'not_in_allowed_contacts' };
 }

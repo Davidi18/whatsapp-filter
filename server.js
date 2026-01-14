@@ -595,12 +595,14 @@ app.post('/api/baileys/send', async (req, res) => {
 
 // Get configuration
 app.get('/api/config', (req, res) => {
+  const webhookHealth = webhookService.getHealth();
   res.json({
     contacts: config.allowedNumbers || [],
     groups: config.allowedGroups || [],
     webhookUrl: config.webhookUrl || '',
     stats: statsService.getLegacyStats(),
-    webhookFromEnv: true
+    webhookConfigured: webhookHealth.configured,
+    webhookFromEnv: !!process.env.WEBHOOK_URL
   });
 });
 

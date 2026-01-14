@@ -460,10 +460,14 @@
             letter-spacing: 0.5px;
         }
 
-        .event-badge.forwarded,
-        .event-badge.stored {
+        .event-badge.forwarded {
             background: rgba(0, 255, 159, 0.15);
             color: #00ff9f;
+        }
+
+        .event-badge.stored {
+            background: rgba(0, 200, 255, 0.15);
+            color: #00c8ff;
         }
 
         .event-badge.filtered {
@@ -1002,6 +1006,13 @@
                 <span class="status-since" id="connSince"></span>
             </div>
 
+            <!-- Webhook Warning Banner (hidden by default) -->
+            <div class="connection-banner status-connecting hidden" id="webhookWarning" style="margin-bottom: 15px;">
+                <span style="font-size: 18px;">&#9888;</span>
+                <span class="status-text" style="color: #ffa500;">NO WEBHOOK CONFIGURED</span>
+                <span class="status-phone" style="color: rgba(255,165,0,0.8);">Messages will be stored locally only, not forwarded to n8n</span>
+            </div>
+
             <div class="status-bar">
                 <div class="status-item">
                     STATUS: <span class="blink" id="systemStatus">LOADING</span>
@@ -1350,6 +1361,8 @@
             const badge = document.getElementById('baileysStatusBadge');
             const qrDisplay = document.getElementById('qrDisplay');
             const instructions = document.getElementById('qrInstructions');
+            const qrSection = document.getElementById('qrSection');
+            const baileysActions = document.querySelector('.baileys-actions');
 
             if (!data.enabled) {
                 section.classList.add('hidden');
@@ -1364,40 +1377,51 @@
 
             // Update QR display based on status
             if (data.status === 'connected') {
+                // Compact mode when connected - hide QR section content, show minimal info
+                qrSection.style.padding = '15px';
                 qrDisplay.innerHTML = `
-                    <div class="empty-state" style="color: #00ff9f;">
-                        <div style="font-size: 48px; margin-bottom: 15px;">&#10004;</div>
-                        <div>CONNECTED</div>
-                        <div style="font-size: 14px; margin-top: 10px; opacity: 0.8;">
-                            ${data.phoneNumber ? '+' + data.phoneNumber : ''}
-                        </div>
+                    <div style="display: flex; align-items: center; gap: 12px; color: #00ff9f;">
+                        <span style="font-size: 24px;">&#10004;</span>
+                        <span style="font-weight: 600;">WHATSAPP CONNECTED</span>
+                        <span style="opacity: 0.7; font-size: 12px;">${data.phoneNumber ? '+' + data.phoneNumber : ''}</span>
                     </div>
                 `;
-                instructions.textContent = 'WhatsApp is connected and ready to receive messages.';
+                instructions.style.display = 'none';
+                if (baileysActions) baileysActions.style.marginTop = '10px';
             } else if (data.status === 'waiting_qr' && data.hasQRCode) {
+                // Full QR display mode
+                qrSection.style.padding = '30px';
+                instructions.style.display = 'block';
                 loadQRCode();
                 instructions.textContent = 'Scan this QR code with WhatsApp to connect.';
+                if (baileysActions) baileysActions.style.marginTop = '20px';
             } else if (data.status === 'connecting') {
+                qrSection.style.padding = '20px';
                 qrDisplay.innerHTML = `
                     <div class="empty-state">
                         <div class="blink">CONNECTING...</div>
                     </div>
                 `;
+                instructions.style.display = 'block';
                 instructions.textContent = 'Establishing connection to WhatsApp...';
             } else if (data.status === 'disconnected') {
+                qrSection.style.padding = '20px';
                 qrDisplay.innerHTML = `
-                    <div class="empty-state" style="color: #ff4757;">
-                        <div style="font-size: 48px; margin-bottom: 15px;">&#10006;</div>
-                        <div>DISCONNECTED</div>
+                    <div style="display: flex; align-items: center; gap: 12px; color: #ff4757;">
+                        <span style="font-size: 24px;">&#10006;</span>
+                        <span style="font-weight: 600;">DISCONNECTED</span>
                     </div>
                 `;
+                instructions.style.display = 'block';
                 instructions.textContent = 'Click RECONNECT to establish a new connection.';
             } else {
+                qrSection.style.padding = '20px';
                 qrDisplay.innerHTML = `
                     <div class="empty-state">
                         <div>INITIALIZING...</div>
                     </div>
                 `;
+                instructions.style.display = 'block';
             }
         }
 
@@ -1479,10 +1503,23 @@
 
                     document.getElementById('systemStatus').textContent = 'ONLINE';
 
-                    if (data.webhookFromEnv) {
-                        document.getElementById('webhookStatus').textContent = 'ENV';
+                    const webhookEl = document.getElementById('webhookStatus');
+                    const webhookWarning = document.getElementById('webhookWarning');
+                    if (data.webhookConfigured === false) {
+                        webhookEl.textContent = 'NOT SET';
+                        webhookEl.style.color = '#ffa500';
+                        webhookEl.title = 'No webhook URL configured - messages will be stored locally only';
+                        webhookWarning.classList.remove('hidden');
+                    } else if (data.webhookFromEnv) {
+                        webhookEl.textContent = 'ENV';
+                        webhookEl.style.color = '#00ff9f';
+                        webhookEl.title = 'Webhook configured via environment variable';
+                        webhookWarning.classList.add('hidden');
                     } else {
-                        document.getElementById('webhookStatus').textContent = 'SET';
+                        webhookEl.textContent = 'SET';
+                        webhookEl.style.color = '#00ff9f';
+                        webhookEl.title = 'Webhook URL is configured';
+                        webhookWarning.classList.add('hidden');
                     }
                 } else {
                     throw new Error(`HTTP ${response.status}`);
@@ -1629,11 +1666,20 @@
                 const sourceTypeBadge = sourceType === 'group' ? '<span class="source-type-badge group">GROUP</span>' :
                                         sourceType === 'contact' ? '<span class="source-type-badge contact">PRIVATE</span>' : '';
 
+                // Add tooltips for different statuses
+                const actionTitle = {
+                    'forwarded': 'Message was forwarded to webhook (n8n)',
+                    'stored': 'Message saved locally (no webhook configured)',
+                    'filtered': 'Message blocked - sender not in allowed list',
+                    'failed': 'Failed to forward to webhook',
+                    'logged': 'Event logged only'
+                }[action] || '';
+
                 return `
                     <div class="event-card ${sourceTypeClass}">
                         <div class="event-card-header">
                             <span class="event-time">${timeStr}</span>
-                            <span class="event-badge ${action}">${action}</span>
+                            <span class="event-badge ${action}" title="${actionTitle}">${action}</span>
                             ${sourceTypeBadge}
                             <span class="event-type-badge">${eventType}</span>
                         </div>
@@ -1727,9 +1773,10 @@
         }
 
         function validatePhone(phone) {
-            const phoneRegex = /^(\d{10,15}|972[-\s]?[1-9]\d{1}[-\s]?\d{3}[-\s]?\d{4})$/;
-            const cleaned = phone.replace(/[-\s]/g, '');
-            return phoneRegex.test(phone) && cleaned.length >= 10 && cleaned.length <= 15;
+            // Remove all formatting to check length
+            const cleaned = phone.replace(/\D/g, '');
+            // Must be 10-15 digits after removing formatting
+            return cleaned.length >= 10 && cleaned.length <= 15;
         }
 
         function validateName(name) {
