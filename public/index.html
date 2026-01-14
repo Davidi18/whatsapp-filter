@@ -951,6 +951,109 @@
             background: #ffa500;
             color: #0d1b2a;
         }
+
+        /* Event Detail Modal */
+        .event-modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .event-modal-overlay.active {
+            display: flex;
+        }
+
+        .event-modal {
+            background: #1a2332;
+            border: 2px solid #00ff9f;
+            border-radius: 8px;
+            max-width: 600px;
+            width: 90%;
+            max-height: 80vh;
+            overflow: hidden;
+            box-shadow: 0 0 30px rgba(0, 255, 159, 0.4);
+        }
+
+        .event-modal-header {
+            background: #00ff9f;
+            color: #0d1b2a;
+            padding: 12px 20px;
+            font-weight: 700;
+            font-size: 14px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .event-modal-close {
+            background: none;
+            border: none;
+            color: #0d1b2a;
+            font-size: 20px;
+            cursor: pointer;
+            font-weight: bold;
+            padding: 0 5px;
+        }
+
+        .event-modal-close:hover {
+            opacity: 0.7;
+        }
+
+        .event-modal-body {
+            padding: 20px;
+            overflow-y: auto;
+            max-height: calc(80vh - 50px);
+        }
+
+        .event-modal-row {
+            display: flex;
+            margin-bottom: 12px;
+            font-size: 12px;
+        }
+
+        .event-modal-label {
+            color: rgba(255, 255, 255, 0.5);
+            min-width: 100px;
+            flex-shrink: 0;
+        }
+
+        .event-modal-value {
+            color: #fff;
+            word-break: break-word;
+        }
+
+        .event-modal-message {
+            background: rgba(0, 255, 159, 0.1);
+            border: 1px solid rgba(0, 255, 159, 0.3);
+            border-radius: 6px;
+            padding: 15px;
+            margin-top: 15px;
+            font-family: monospace;
+            font-size: 13px;
+            line-height: 1.5;
+            color: #fff;
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .event-card {
+            cursor: pointer;
+            transition: transform 0.1s, box-shadow 0.1s;
+        }
+
+        .event-card:hover {
+            transform: translateX(5px);
+            box-shadow: -3px 0 0 #00ff9f;
+        }
     </style>
 </head>
 <body>
@@ -1991,7 +2094,7 @@
                 return;
             }
 
-            list.innerHTML = events.map(e => {
+            list.innerHTML = events.map((e, index) => {
                 const time = new Date(e.timestamp);
                 const timeStr = time.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
                 const action = (e.action || 'logged').toLowerCase();
@@ -2013,8 +2116,11 @@
                     'logged': 'Event logged only'
                 }[action] || '';
 
+                // Store event data for modal
+                const eventData = encodeURIComponent(JSON.stringify(e));
+
                 return `
-                    <div class="event-card ${sourceTypeClass}">
+                    <div class="event-card ${sourceTypeClass}" onclick="showEventModal('${eventData}')">
                         <div class="event-card-header">
                             <span class="event-time">${timeStr}</span>
                             <span class="event-badge ${action}" title="${actionTitle}">${action}</span>
@@ -2045,6 +2151,88 @@
             };
             return icons[type] || '';
         }
+
+        // Show event detail modal
+        function showEventModal(encodedData) {
+            const event = JSON.parse(decodeURIComponent(encodedData));
+            const modal = document.getElementById('eventModal');
+            const body = document.getElementById('eventModalBody');
+
+            const time = new Date(event.timestamp);
+            const timeStr = time.toLocaleString('he-IL', {
+                year: 'numeric', month: '2-digit', day: '2-digit',
+                hour: '2-digit', minute: '2-digit', second: '2-digit'
+            });
+
+            const msgTypeIcon = getMessageTypeIcon(event.messageType);
+            const actionColors = {
+                'forwarded': '#00ff9f',
+                'stored': '#00c8ff',
+                'filtered': '#ffa500',
+                'failed': '#ff4757',
+                'logged': '#808080'
+            };
+            const actionColor = actionColors[event.action] || '#808080';
+
+            body.innerHTML = `
+                <div class="event-modal-row">
+                    <span class="event-modal-label">TIME</span>
+                    <span class="event-modal-value">${escapeHtml(timeStr)}</span>
+                </div>
+                <div class="event-modal-row">
+                    <span class="event-modal-label">STATUS</span>
+                    <span class="event-modal-value" style="color: ${actionColor}; font-weight: bold;">${escapeHtml((event.action || 'logged').toUpperCase())}</span>
+                </div>
+                <div class="event-modal-row">
+                    <span class="event-modal-label">FROM</span>
+                    <span class="event-modal-value">${escapeHtml(event.senderName || event.source || 'Unknown')}</span>
+                </div>
+                <div class="event-modal-row">
+                    <span class="event-modal-label">SOURCE</span>
+                    <span class="event-modal-value">${escapeHtml(event.source || '-')}</span>
+                </div>
+                <div class="event-modal-row">
+                    <span class="event-modal-label">TYPE</span>
+                    <span class="event-modal-value">${msgTypeIcon} ${escapeHtml(event.messageType || 'text')}</span>
+                </div>
+                ${event.sourceType ? `
+                <div class="event-modal-row">
+                    <span class="event-modal-label">SOURCE TYPE</span>
+                    <span class="event-modal-value">${escapeHtml(event.sourceType.toUpperCase())}</span>
+                </div>
+                ` : ''}
+                ${event.reason ? `
+                <div class="event-modal-row">
+                    <span class="event-modal-label">REASON</span>
+                    <span class="event-modal-value" style="color: #ffa500;">${escapeHtml(event.reason)}</span>
+                </div>
+                ` : ''}
+                ${event.error ? `
+                <div class="event-modal-row">
+                    <span class="event-modal-label">ERROR</span>
+                    <span class="event-modal-value" style="color: #ff4757;">${escapeHtml(event.error)}</span>
+                </div>
+                ` : ''}
+                ${event.messageBody || event.messagePreview ? `
+                <div class="event-modal-message">${escapeHtml(event.messageBody || event.messagePreview)}</div>
+                ` : '<div class="event-modal-message" style="color: rgba(255,255,255,0.4); font-style: italic;">No message content</div>'}
+            `;
+
+            modal.classList.add('active');
+        }
+
+        // Close event detail modal
+        function closeEventModal(e) {
+            if (e && e.target !== e.currentTarget) return;
+            document.getElementById('eventModal').classList.remove('active');
+        }
+
+        // Close modal on Escape key
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                closeEventModal();
+            }
+        });
 
         // Escape HTML to prevent XSS
         function escapeHtml(text) {
@@ -2469,5 +2657,17 @@
             }
         })();
     </script>
+
+    <!-- Event Detail Modal -->
+    <div class="event-modal-overlay" id="eventModal" onclick="closeEventModal(event)">
+        <div class="event-modal" onclick="event.stopPropagation()">
+            <div class="event-modal-header">
+                <span>EVENT DETAILS</span>
+                <button class="event-modal-close" onclick="closeEventModal()">&times;</button>
+            </div>
+            <div class="event-modal-body" id="eventModalBody">
+            </div>
+        </div>
+    </div>
 </body>
 </html>

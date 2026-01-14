@@ -205,6 +205,7 @@ async function handleUpsert(payload, context) {
       senderName,
       action: 'filtered',
       messagePreview,
+      messageBody: messageContent.body,
       messageType: messageContent.type,
       reason
     });
@@ -240,6 +241,7 @@ async function handleUpsert(payload, context) {
       senderName,
       action: 'stored',
       messagePreview,
+      messageBody: messageContent.body,
       messageType: messageContent.type
     });
     logger.filter(sourceId, true, sourceType);
@@ -264,6 +266,7 @@ async function handleUpsert(payload, context) {
       senderName,
       action: 'forwarded',
       messagePreview,
+      messageBody: messageContent.body,
       messageType: messageContent.type
     });
     logger.filter(sourceId, true, sourceType);
@@ -279,6 +282,7 @@ async function handleUpsert(payload, context) {
       senderName,
       action: 'failed',
       messagePreview,
+      messageBody: messageContent.body,
       messageType: messageContent.type,
       error: error.message
     });
@@ -411,6 +415,7 @@ async function handleSend(payload, context) {
         senderName: 'Me → ' + recipientName,
         action: 'forwarded',
         messagePreview,
+        messageBody: messageContent.body,
         messageType: messageContent.type
       });
       return { action: 'forwarded' };
@@ -428,6 +433,7 @@ async function handleSend(payload, context) {
     senderName: 'Me → ' + recipientName,
     action: 'stored',
     messagePreview,
+    messageBody: messageContent.body,
     messageType: messageContent.type
   });
   return { action: 'stored' };
