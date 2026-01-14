@@ -457,6 +457,74 @@
             grid-template-columns: 1fr 1fr auto 60px;
         }
 
+        /* Inline type selector */
+        .contact-type-select {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            text-align: center;
+            padding: 4px 24px 4px 8px;
+            border-radius: 3px;
+            background-color: rgba(0,255,159,0.1);
+            border: 1px solid rgba(0,255,159,0.3);
+            color: #00ff9f;
+            font-family: 'Orbitron', monospace;
+            cursor: pointer;
+            appearance: none;
+            -webkit-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 12 12'%3E%3Cpath fill='%2300ff9f' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 6px center;
+            transition: all 0.2s ease;
+            min-width: 90px;
+        }
+
+        .contact-type-select:hover {
+            border-color: #00ff9f;
+            box-shadow: 0 0 8px rgba(0,255,159,0.3);
+        }
+
+        .contact-type-select:focus {
+            outline: none;
+            border-color: #00ff9f;
+            box-shadow: 0 0 10px rgba(0,255,159,0.4);
+        }
+
+        .contact-type-select option {
+            background: #1a2332;
+            color: #00ff9f;
+            padding: 8px;
+        }
+
+        /* Type-specific colors for select */
+        .contact-type-select.type-vip {
+            background-color: rgba(255,215,0,0.15);
+            border-color: rgba(255,215,0,0.4);
+            color: #ffd700;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 12 12'%3E%3Cpath fill='%23ffd700' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+        }
+
+        .contact-type-select.type-business {
+            background-color: rgba(0,200,255,0.15);
+            border-color: rgba(0,200,255,0.4);
+            color: #00c8ff;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 12 12'%3E%3Cpath fill='%2300c8ff' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+        }
+
+        .contact-type-select.type-temp {
+            background-color: rgba(255,165,0,0.15);
+            border-color: rgba(255,165,0,0.4);
+            color: #ffa500;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 12 12'%3E%3Cpath fill='%23ffa500' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+        }
+
+        .contact-type-select.type-general {
+            background-color: rgba(168,85,247,0.15);
+            border-color: rgba(168,85,247,0.4);
+            color: #a855f7;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 12 12'%3E%3Cpath fill='%23a855f7' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+        }
+
         .remove-btn {
             background: transparent;
             border: 1px solid #ff4757;
@@ -2460,7 +2528,12 @@
                     <div class="contact-item">
                         <div class="contact-number">${escapeHtml(contact.phone)}</div>
                         <div class="contact-name">${escapeHtml(contact.name)}</div>
-                        <div class="contact-type ${typeClass}">${escapeHtml(contact.type)}</div>
+                        <select class="contact-type-select ${typeClass}" onchange="updateContactType(${realIndex}, this.value)" title="Click to change type">
+                            <option value="PERSONAL" ${contact.type === 'PERSONAL' ? 'selected' : ''}>PERSONAL</option>
+                            <option value="BUSINESS" ${contact.type === 'BUSINESS' ? 'selected' : ''}>BUSINESS</option>
+                            <option value="VIP" ${contact.type === 'VIP' ? 'selected' : ''}>VIP</option>
+                            <option value="TEMP" ${contact.type === 'TEMP' ? 'selected' : ''}>TEMP</option>
+                        </select>
                         <button class="remove-btn" onclick="removeContact(${realIndex})" title="Remove contact">×</button>
                     </div>
                 `;
@@ -2543,6 +2616,25 @@
             }
         }
 
+        async function updateContactType(index, newType) {
+            if (index < 0 || index >= contacts.length) return;
+
+            const oldType = contacts[index].type;
+            contacts[index].type = newType;
+
+            try {
+                await saveContacts();
+                const searchInput = document.getElementById('contactSearchInput');
+                renderContacts(searchInput?.value || '');
+                showToast(`TYPE UPDATED TO ${newType}`);
+            } catch (error) {
+                contacts[index].type = oldType;
+                const searchInput = document.getElementById('contactSearchInput');
+                renderContacts(searchInput?.value || '');
+                showToast('UPDATE FAILED', 'error');
+            }
+        }
+
         // ============ GROUP FUNCTIONS ============
 
         function validateGroupId(groupId) {
@@ -2582,12 +2674,18 @@
 
             list.innerHTML = filtered.map((group, index) => {
                 const realIndex = groups.indexOf(group);
-                const typeClass = `type-${(group.type || 'general').toLowerCase()}`;
+                const currentType = group.type || 'GENERAL';
+                const typeClass = `type-${currentType.toLowerCase()}`;
+                const typeOptions = availableTypes.group.map(t =>
+                    `<option value="${t}" ${currentType === t ? 'selected' : ''}>${t}</option>`
+                ).join('');
                 return `
                     <div class="contact-item group-item">
                         <div class="contact-number">${escapeHtml(group.groupId)}</div>
                         <div class="contact-name">${escapeHtml(group.name)}</div>
-                        <div class="contact-type ${typeClass}">${escapeHtml(group.type || 'GENERAL')}</div>
+                        <select class="contact-type-select ${typeClass}" onchange="updateGroupType(${realIndex}, this.value)" title="Click to change type">
+                            ${typeOptions}
+                        </select>
                         <button class="remove-btn" onclick="removeGroup(${realIndex})" title="Remove group">×</button>
                     </div>
                 `;
@@ -2680,6 +2778,35 @@
             } catch (error) {
                 console.error('Failed to remove group:', error);
                 showToast('FAILED TO REMOVE', 'error');
+            }
+        }
+
+        async function updateGroupType(index, newType) {
+            if (index < 0 || index >= groups.length) return;
+
+            const group = groups[index];
+            const oldType = group.type;
+            group.type = newType;
+
+            try {
+                const response = await authFetch(`/api/groups/${encodeURIComponent(group.groupId)}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ type: newType })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to update group');
+                }
+
+                const searchInput = document.getElementById('groupSearchInput');
+                renderGroups(searchInput?.value || '');
+                showToast(`TYPE UPDATED TO ${newType}`);
+            } catch (error) {
+                group.type = oldType;
+                const searchInput = document.getElementById('groupSearchInput');
+                renderGroups(searchInput?.value || '');
+                showToast('UPDATE FAILED', 'error');
             }
         }
 
