@@ -7,11 +7,38 @@
 // Examples: +972547554964, 972-54-755-4964, +972-54-755-4964, 0547554964
 const PHONE_REGEX = /^\+?[\d\s\-()]{10,20}$/;
 
-// Group ID validation (numeric string, typically 18 digits)
-const GROUP_ID_REGEX = /^\d{10,25}$/;
+// Group ID validation (numeric string, typically 18 digits, with optional @g.us suffix)
+const GROUP_ID_REGEX = /^\d{10,25}(@g\.us)?$/;
 
-// Valid contact types
-const VALID_CONTACT_TYPES = ['PERSONAL', 'BUSINESS', 'VIP', 'TEMP'];
+// Default contact/group types
+const DEFAULT_CONTACT_TYPES = ['PERSONAL', 'BUSINESS', 'VIP', 'TEMP'];
+const DEFAULT_GROUP_TYPES = ['GENERAL', 'BUSINESS', 'VIP', 'TEMP'];
+
+// Will be populated from config for custom types
+let customContactTypes = [];
+let customGroupTypes = [];
+
+/**
+ * Set custom types from config
+ */
+function setCustomTypes(contactTypes = [], groupTypes = []) {
+  customContactTypes = contactTypes;
+  customGroupTypes = groupTypes;
+}
+
+/**
+ * Get all valid contact types (default + custom)
+ */
+function getValidContactTypes() {
+  return [...DEFAULT_CONTACT_TYPES, ...customContactTypes];
+}
+
+/**
+ * Get all valid group types (default + custom)
+ */
+function getValidGroupTypes() {
+  return [...DEFAULT_GROUP_TYPES, ...customGroupTypes];
+}
 
 /**
  * Validate phone number format
@@ -40,7 +67,14 @@ function isValidGroupId(groupId) {
  * Validate contact type
  */
 function isValidContactType(type) {
-  return VALID_CONTACT_TYPES.includes(type);
+  return getValidContactTypes().includes(type);
+}
+
+/**
+ * Validate group type
+ */
+function isValidGroupType(type) {
+  return getValidGroupTypes().includes(type);
 }
 
 /**
@@ -101,9 +135,14 @@ module.exports = {
   isValidPhone,
   isValidGroupId,
   isValidContactType,
+  isValidGroupType,
   isValidName,
   normalizePhone,
   normalizeGroupId,
   parseRemoteJid,
-  VALID_CONTACT_TYPES
+  setCustomTypes,
+  getValidContactTypes,
+  getValidGroupTypes,
+  DEFAULT_CONTACT_TYPES,
+  DEFAULT_GROUP_TYPES
 };

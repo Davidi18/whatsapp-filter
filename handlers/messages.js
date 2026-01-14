@@ -8,7 +8,7 @@ const statsService = require('../services/stats');
 const alertService = require('../services/alerts');
 const messageStore = require('../services/messageStore');
 const logger = require('../utils/logger');
-const { parseRemoteJid, normalizePhone } = require('../utils/validators');
+const { parseRemoteJid, normalizePhone, normalizeGroupId } = require('../utils/validators');
 
 // Config will be injected
 let config = null;
@@ -22,18 +22,44 @@ function setConfig(cfg) {
 
 /**
  * Check if source is allowed
+ * Returns: { isAllowed, sourceId, sourceType, entityType, reason }
+ * entityType is the type of the contact/group (VIP, BUSINESS, etc.)
  */
 function checkAllowed(remoteJid) {
   const { sourceId, sourceType, isStatusBroadcast } = parseRemoteJid(remoteJid);
 
   if (isStatusBroadcast) {
-    return { isAllowed: false, sourceId: '', sourceType: 'status', reason: 'status_broadcast' };
+    return { isAllowed: false, sourceId: '', sourceType: 'status', entityType: null, reason: 'status_broadcast' };
   }
 
   if (sourceType === 'group') {
-    const isAllowed = config?.allowedGroups?.some(g => g.groupId === sourceId) || false;
-    logger.debug('Group check', { sourceId, isAllowed, configuredGroups: config?.allowedGroups?.length || 0 });
-    return { isAllowed, sourceId, sourceType, reason: isAllowed ? null : 'not_in_allowed_groups' };
+    // Normalize group ID for comparison (handles @g.us suffix variations)
+    const normalizedSourceId = normalizeGroupId(sourceId);
+    const matchedGroup = config?.allowedGroups?.find(g =>
+      normalizeGroupId(g.groupId) === normalizedSourceId
+    );
+    const isAllowed = !!matchedGroup;
+
+    // Debug logging for group matching
+    if (!isAllowed && config?.allowedGroups?.length > 0) {
+      logger.debug('Group match failed', {
+        incoming: sourceId,
+        normalized: normalizedSourceId,
+        configuredSample: config.allowedGroups.slice(0, 3).map(g => ({
+          original: g.groupId,
+          normalized: normalizeGroupId(g.groupId)
+        }))
+      });
+    }
+
+    return {
+      isAllowed,
+      sourceId,
+      sourceType,
+      entityType: matchedGroup?.type || null,
+      entityName: matchedGroup?.name || null,
+      reason: isAllowed ? null : 'not_in_allowed_groups'
+    };
   }
 
   // Personal message - normalize both sides for comparison
@@ -55,7 +81,14 @@ function checkAllowed(remoteJid) {
     });
   }
 
-  return { isAllowed, sourceId, sourceType, reason: isAllowed ? null : 'not_in_allowed_contacts' };
+  return {
+    isAllowed,
+    sourceId,
+    sourceType,
+    entityType: matchedContact?.type || null,
+    entityName: matchedContact?.name || null,
+    reason: isAllowed ? null : 'not_in_allowed_contacts'
+  };
 }
 
 /**
@@ -147,10 +180,10 @@ async function handleUpsert(payload, context) {
   // Extract sender info - Evolution API wraps data in 'data' field
   const data = payload.data || payload;
   const remoteJid = data.key?.remoteJid || '';
-  const { isAllowed, sourceId, sourceType, reason } = checkAllowed(remoteJid);
+  const { isAllowed, sourceId, sourceType, entityType, entityName, reason } = checkAllowed(remoteJid);
 
-  // Extract sender name (pushName) from Evolution API payload
-  const senderName = data.pushName || '';
+  // Extract sender name (pushName) from Evolution API payload, fallback to entity name from config
+  const senderName = data.pushName || entityName || '';
 
   // Skip status broadcasts silently
   if (sourceType === 'status') {
@@ -206,11 +239,12 @@ async function handleUpsert(payload, context) {
     return { action: 'stored', source: sourceId, sourceType };
   }
 
-  // Forward to n8n
+  // Forward to n8n (with type-based routing)
   try {
     await webhookService.forward(payload, {
       sourceId,
       sourceType,
+      entityType,
       event: 'MESSAGES_UPSERT'
     });
 
@@ -219,6 +253,7 @@ async function handleUpsert(payload, context) {
       event: 'MESSAGES_UPSERT',
       source: sourceId,
       sourceType,
+      entityType,
       senderName,
       action: 'forwarded',
       messagePreview,
@@ -226,13 +261,14 @@ async function handleUpsert(payload, context) {
     });
     logger.filter(sourceId, true, sourceType);
 
-    return { action: 'forwarded', source: sourceId, sourceType };
+    return { action: 'forwarded', source: sourceId, sourceType, entityType };
   } catch (error) {
     statsService.increment('MESSAGES_UPSERT', 'failed');
     statsService.logEvent({
       event: 'MESSAGES_UPSERT',
       source: sourceId,
       sourceType,
+      entityType,
       senderName,
       action: 'failed',
       messagePreview,

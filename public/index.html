@@ -1190,6 +1190,12 @@
                             >
                         </div>
                         <div class="input-group">
+                            <div class="input-label">TYPE</div>
+                            <select class="input-field" id="groupTypeSelect">
+                                <!-- Populated dynamically -->
+                            </select>
+                        </div>
+                        <div class="input-group">
                             <div class="input-label">&nbsp;</div>
                             <button class="btn" onclick="addGroup()">ADD</button>
                         </div>
@@ -1364,12 +1370,37 @@
         let stats = { totalMessages: 0, filteredMessages: 0, allowedMessages: 0 };
         let baileysMode = false;
         let baileysStatus = 'unknown';
+        let availableTypes = {
+            contact: ['PERSONAL', 'BUSINESS', 'VIP', 'TEMP'],
+            group: ['GENERAL', 'BUSINESS', 'VIP', 'TEMP']
+        };
+        let typeWebhooks = {};
 
         // Rate limiting for login
         let loginAttempts = 0;
         let loginLockoutUntil = 0;
         const MAX_LOGIN_ATTEMPTS = 5;
         const LOCKOUT_DURATION = 60000; // 1 minute
+
+        // ============ TYPE MANAGEMENT ============
+
+        function populateTypeSelects() {
+            // Populate contact type select
+            const contactTypeSelect = document.getElementById('typeSelect');
+            if (contactTypeSelect) {
+                contactTypeSelect.innerHTML = availableTypes.contact.map(t =>
+                    `<option value="${t}">${t}</option>`
+                ).join('');
+            }
+
+            // Populate group type select
+            const groupTypeSelect = document.getElementById('groupTypeSelect');
+            if (groupTypeSelect) {
+                groupTypeSelect.innerHTML = availableTypes.group.map(t =>
+                    `<option value="${t}">${t}</option>`
+                ).join('');
+            }
+        }
 
         // ============ BAILEYS FUNCTIONS ============
 
@@ -1592,6 +1623,15 @@
                     contacts = data.contacts || [];
                     groups = data.groups || [];
                     stats = data.stats || stats;
+                    typeWebhooks = data.typeWebhooks || {};
+
+                    // Update available types from server
+                    if (data.types) {
+                        availableTypes = data.types;
+                    }
+
+                    // Populate type select dropdowns
+                    populateTypeSelects();
 
                     renderContacts();
                     renderGroups();
@@ -2052,7 +2092,8 @@
                 const term = searchTerm.toLowerCase();
                 filtered = groups.filter(g =>
                     g.groupId.toLowerCase().includes(term) ||
-                    g.name.toLowerCase().includes(term)
+                    g.name.toLowerCase().includes(term) ||
+                    (g.type && g.type.toLowerCase().includes(term))
                 );
             }
 
@@ -2069,10 +2110,12 @@
 
             list.innerHTML = filtered.map((group, index) => {
                 const realIndex = groups.indexOf(group);
+                const typeClass = (group.type || 'GENERAL').toLowerCase();
                 return `
-                    <div class="contact-item" style="grid-template-columns: 1fr 1fr 60px;">
+                    <div class="contact-item" style="grid-template-columns: 1fr 1fr auto 60px;">
                         <div class="contact-number">${escapeHtml(group.groupId)}</div>
                         <div class="contact-name">${escapeHtml(group.name)}</div>
+                        <div class="contact-type ${typeClass}">${escapeHtml(group.type || 'GENERAL')}</div>
                         <button class="remove-btn" onclick="removeGroup(${realIndex})" title="Remove group">×</button>
                     </div>
                 `;
@@ -2082,9 +2125,11 @@
         async function addGroup() {
             const groupIdInput = document.getElementById('groupIdInput');
             const groupNameInput = document.getElementById('groupNameInput');
+            const groupTypeSelect = document.getElementById('groupTypeSelect');
 
             let groupId = groupIdInput.value.trim();
             let name = groupNameInput.value.trim();
+            const type = groupTypeSelect.value;
 
             if (!groupId || !name) {
                 showToast('MISSING DATA', 'error');
@@ -2115,7 +2160,7 @@
                 const response = await authFetch('/api/groups/add', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ groupId, name })
+                    body: JSON.stringify({ groupId, name, type })
                 });
 
                 if (!response.ok) {

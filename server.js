@@ -25,7 +25,7 @@ const baileysEvents = require('./handlers/baileysEvents');
 
 // Utils
 const logger = require('./utils/logger');
-const { isValidPhone, isValidGroupId, isValidContactType, isValidName, normalizeGroupId } = require('./utils/validators');
+const { isValidPhone, isValidGroupId, isValidContactType, isValidGroupType, isValidName, normalizeGroupId } = require('./utils/validators');
 
 const app = express();
 app.set('trust proxy', 1); // Trust first proxy (nginx, Cloudflare, etc.)
@@ -156,6 +156,8 @@ let config = {
 
 // Load configuration
 async function loadConfig() {
+  const validators = require('./utils/validators');
+
   try {
     const configPath = path.join(__dirname, 'config', 'contacts.json');
     const data = await fs.readFile(configPath, 'utf8');
@@ -166,11 +168,18 @@ async function loadConfig() {
 
     config = {
       ...savedConfig,
-      webhookUrl
+      webhookUrl,
+      typeWebhooks: savedConfig.typeWebhooks || {},
+      customContactTypes: savedConfig.customContactTypes || [],
+      customGroupTypes: savedConfig.customGroupTypes || []
     };
 
-    // Initialize webhook service with the URL
+    // Initialize webhook service with the URL and type webhooks
     webhookService.init(webhookUrl);
+    webhookService.setTypeWebhooks(config.typeWebhooks);
+
+    // Set custom types in validators
+    validators.setCustomTypes(config.customContactTypes, config.customGroupTypes);
 
     // Import legacy stats
     if (savedConfig.stats) {
@@ -181,6 +190,8 @@ async function loadConfig() {
       contacts: config.allowedNumbers?.length || 0,
       groups: config.allowedGroups?.length || 0,
       webhookConfigured: !!webhookUrl,
+      typeWebhooks: Object.keys(config.typeWebhooks).length,
+      customTypes: config.customContactTypes.length + config.customGroupTypes.length,
       webhookSource: process.env.WEBHOOK_URL ? 'env' : (savedConfig.webhookUrl ? 'config' : 'none')
     });
   } catch (error) {
@@ -190,6 +201,9 @@ async function loadConfig() {
       logger.info('No existing config found, using defaults');
     }
     config.webhookUrl = process.env.WEBHOOK_URL || '';
+    config.typeWebhooks = {};
+    config.customContactTypes = [];
+    config.customGroupTypes = [];
     webhookService.init(config.webhookUrl);
   }
 
@@ -205,10 +219,13 @@ async function saveConfig() {
     // Ensure config directory exists
     await fs.mkdir(path.dirname(configPath), { recursive: true });
 
-    // Save webhook URL only if not set via environment
+    // Save all configuration
     const configToSave = {
       allowedNumbers: config.allowedNumbers,
       allowedGroups: config.allowedGroups,
+      typeWebhooks: config.typeWebhooks || {},
+      customContactTypes: config.customContactTypes || [],
+      customGroupTypes: config.customGroupTypes || [],
       stats: statsService.getLegacyStats()
     };
 
@@ -608,14 +625,20 @@ app.post('/api/baileys/send', async (req, res) => {
 
 // Get configuration
 app.get('/api/config', (req, res) => {
+  const validators = require('./utils/validators');
   const webhookHealth = webhookService.getHealth();
   res.json({
     contacts: config.allowedNumbers || [],
     groups: config.allowedGroups || [],
     webhookUrl: config.webhookUrl || '',
+    typeWebhooks: config.typeWebhooks || {},
     stats: statsService.getLegacyStats(),
     webhookConfigured: webhookHealth.configured,
-    webhookFromEnv: !!process.env.WEBHOOK_URL
+    webhookFromEnv: !!process.env.WEBHOOK_URL,
+    types: {
+      contact: validators.getValidContactTypes(),
+      group: validators.getValidGroupTypes()
+    }
   });
 });
 
@@ -662,10 +685,131 @@ app.post('/api/webhook', async (req, res) => {
 // Test webhook connection
 app.post('/api/webhook/test', async (req, res) => {
   try {
-    const result = await webhookService.test();
+    const { entityType } = req.body;
+    const result = await webhookService.test(entityType);
     res.json(result);
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Get/Set type-specific webhooks
+app.get('/api/webhooks/types', (req, res) => {
+  const validators = require('./utils/validators');
+  res.json({
+    typeWebhooks: config.typeWebhooks || {},
+    availableTypes: {
+      contact: validators.getValidContactTypes(),
+      group: validators.getValidGroupTypes()
+    }
+  });
+});
+
+app.post('/api/webhooks/types', async (req, res) => {
+  try {
+    const { typeWebhooks } = req.body;
+
+    if (!typeWebhooks || typeof typeWebhooks !== 'object') {
+      return res.status(400).json({ error: 'Invalid typeWebhooks format' });
+    }
+
+    // Validate URLs
+    for (const [type, url] of Object.entries(typeWebhooks)) {
+      if (url && typeof url === 'string' && url.trim()) {
+        try {
+          new URL(url);
+        } catch {
+          return res.status(400).json({ error: `Invalid URL for type ${type}` });
+        }
+      }
+    }
+
+    // Filter out empty URLs
+    const cleanedWebhooks = {};
+    for (const [type, url] of Object.entries(typeWebhooks)) {
+      if (url && typeof url === 'string' && url.trim()) {
+        cleanedWebhooks[type] = url.trim();
+      }
+    }
+
+    config.typeWebhooks = cleanedWebhooks;
+    webhookService.setTypeWebhooks(cleanedWebhooks);
+    await saveConfig();
+
+    logger.info('Type webhooks updated', { types: Object.keys(cleanedWebhooks) });
+
+    res.json({
+      success: true,
+      typeWebhooks: cleanedWebhooks
+    });
+  } catch (error) {
+    logger.error('Failed to update type webhooks', { error: error.message });
+    res.status(500).json({ error: 'Failed to update type webhooks' });
+  }
+});
+
+// Custom types management
+app.get('/api/types', (req, res) => {
+  const validators = require('./utils/validators');
+  res.json({
+    contactTypes: {
+      default: validators.DEFAULT_CONTACT_TYPES,
+      custom: config.customContactTypes || []
+    },
+    groupTypes: {
+      default: validators.DEFAULT_GROUP_TYPES,
+      custom: config.customGroupTypes || []
+    }
+  });
+});
+
+app.post('/api/types', async (req, res) => {
+  try {
+    const validators = require('./utils/validators');
+    const { customContactTypes, customGroupTypes } = req.body;
+
+    // Validate types are arrays of strings
+    if (customContactTypes !== undefined) {
+      if (!Array.isArray(customContactTypes)) {
+        return res.status(400).json({ error: 'customContactTypes must be an array' });
+      }
+      for (const type of customContactTypes) {
+        if (typeof type !== 'string' || type.length < 2 || type.length > 20) {
+          return res.status(400).json({ error: 'Type names must be 2-20 characters' });
+        }
+      }
+      config.customContactTypes = customContactTypes.map(t => t.toUpperCase());
+    }
+
+    if (customGroupTypes !== undefined) {
+      if (!Array.isArray(customGroupTypes)) {
+        return res.status(400).json({ error: 'customGroupTypes must be an array' });
+      }
+      for (const type of customGroupTypes) {
+        if (typeof type !== 'string' || type.length < 2 || type.length > 20) {
+          return res.status(400).json({ error: 'Type names must be 2-20 characters' });
+        }
+      }
+      config.customGroupTypes = customGroupTypes.map(t => t.toUpperCase());
+    }
+
+    // Update validators
+    validators.setCustomTypes(config.customContactTypes, config.customGroupTypes);
+    await saveConfig();
+
+    logger.info('Custom types updated', {
+      contactTypes: config.customContactTypes,
+      groupTypes: config.customGroupTypes
+    });
+
+    res.json({
+      success: true,
+      contactTypes: validators.getValidContactTypes(),
+      groupTypes: validators.getValidGroupTypes()
+    });
+  } catch (error) {
+    logger.error('Failed to update custom types', { error: error.message });
+    res.status(500).json({ error: 'Failed to update custom types' });
   }
 });
 
@@ -811,7 +955,7 @@ app.get('/api/groups', (req, res) => {
 // Add group
 app.post('/api/groups/add', async (req, res) => {
   try {
-    let { groupId, name } = req.body;
+    let { groupId, name, type } = req.body;
 
     if (!groupId || !name) {
       return res.status(400).json({ error: 'Missing required fields: groupId, name' });
@@ -819,6 +963,9 @@ app.post('/api/groups/add', async (req, res) => {
 
     // Remove @g.us suffix if present
     groupId = normalizeGroupId(groupId);
+
+    // Default type if not provided
+    type = type || 'GENERAL';
 
     if (!isValidGroupId(groupId)) {
       return res.status(400).json({ error: 'Invalid group ID format' });
@@ -828,15 +975,19 @@ app.post('/api/groups/add', async (req, res) => {
       return res.status(400).json({ error: 'Name must be 2-50 characters' });
     }
 
+    if (!isValidGroupType(type)) {
+      return res.status(400).json({ error: 'Invalid group type' });
+    }
+
     if (!config.allowedGroups) {
       config.allowedGroups = [];
     }
 
-    if (config.allowedGroups.some(g => g.groupId === groupId)) {
+    if (config.allowedGroups.some(g => normalizeGroupId(g.groupId) === groupId)) {
       return res.status(409).json({ error: 'Group already exists' });
     }
 
-    const newGroup = { groupId, name };
+    const newGroup = { groupId, name, type };
     config.allowedGroups.push(newGroup);
     eventRouter.setConfig(config);
     await saveConfig();
@@ -852,13 +1003,13 @@ app.post('/api/groups/add', async (req, res) => {
 app.put('/api/groups/:groupId', async (req, res) => {
   try {
     const groupId = normalizeGroupId(req.params.groupId);
-    const { name } = req.body;
+    const { name, type } = req.body;
 
     if (!config.allowedGroups) {
       return res.status(404).json({ error: 'Group not found' });
     }
 
-    const groupIndex = config.allowedGroups.findIndex(g => g.groupId === groupId);
+    const groupIndex = config.allowedGroups.findIndex(g => normalizeGroupId(g.groupId) === groupId);
     if (groupIndex === -1) {
       return res.status(404).json({ error: 'Group not found' });
     }
@@ -868,6 +1019,13 @@ app.put('/api/groups/:groupId', async (req, res) => {
         return res.status(400).json({ error: 'Name must be 2-50 characters' });
       }
       config.allowedGroups[groupIndex].name = name;
+    }
+
+    if (type !== undefined) {
+      if (!isValidGroupType(type)) {
+        return res.status(400).json({ error: 'Invalid group type' });
+      }
+      config.allowedGroups[groupIndex].type = type;
     }
 
     eventRouter.setConfig(config);
@@ -888,7 +1046,7 @@ app.delete('/api/groups/:groupId', async (req, res) => {
       return res.status(404).json({ error: 'Group not found' });
     }
 
-    const groupIndex = config.allowedGroups.findIndex(g => g.groupId === groupId);
+    const groupIndex = config.allowedGroups.findIndex(g => normalizeGroupId(g.groupId) === groupId);
     if (groupIndex === -1) {
       return res.status(404).json({ error: 'Group not found' });
     }
