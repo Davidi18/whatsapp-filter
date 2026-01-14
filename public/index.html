@@ -1100,6 +1100,26 @@
                 </div>
             </div>
 
+            <!-- Type-Based Webhooks -->
+            <div class="section collapsed" id="typeWebhooksSection">
+                <div class="section-header section-toggle" onclick="toggleSection(this)">
+                    <span><span class="toggle-icon">▼</span> TYPE WEBHOOKS</span>
+                    <span id="typeWebhooksCount" style="font-size: 10px; opacity: 0.7;">0 configured</span>
+                </div>
+                <div class="section-content">
+                    <div style="background: rgba(0,255,159,0.05); border: 1px solid rgba(0,255,159,0.2); border-radius: 4px; padding: 10px; margin-bottom: 15px; font-size: 11px; opacity: 0.8;">
+                        Configure different webhook URLs for different contact/group types. If not set, the default webhook will be used.
+                    </div>
+                    <div id="typeWebhooksList" class="contact-list">
+                        <!-- Populated by JS -->
+                    </div>
+                    <div style="margin-top: 15px; display: flex; gap: 10px;">
+                        <button class="btn" onclick="saveTypeWebhooks()">SAVE ALL</button>
+                        <button class="btn btn-small" onclick="loadTypeWebhooks()" style="padding: 12px 15px;">REFRESH</button>
+                    </div>
+                </div>
+            </div>
+
             <!-- Event Statistics -->
             <div class="section collapsed">
                 <div class="section-header section-toggle" onclick="toggleSection(this)">
@@ -1614,6 +1634,152 @@
             header.closest('.section').classList.toggle('collapsed');
         }
 
+        // ============ TYPE WEBHOOKS FUNCTIONS ============
+
+        async function loadTypeWebhooks() {
+            try {
+                const response = await authFetch('/api/webhooks/types');
+                if (response.ok) {
+                    const data = await response.json();
+                    typeWebhooks = data.typeWebhooks || {};
+                    // Also update available types if returned
+                    if (data.availableTypes) {
+                        availableTypes = data.availableTypes;
+                    }
+                    renderTypeWebhooks();
+                }
+            } catch (error) {
+                console.error('Failed to load type webhooks:', error);
+            }
+        }
+
+        function renderTypeWebhooks() {
+            const list = document.getElementById('typeWebhooksList');
+            const countEl = document.getElementById('typeWebhooksCount');
+
+            // Get all unique types from both contacts and groups
+            const allTypes = [...new Set([
+                ...availableTypes.contact,
+                ...availableTypes.group
+            ])];
+
+            // Count configured webhooks
+            const configuredCount = Object.keys(typeWebhooks).filter(t => typeWebhooks[t]).length;
+            if (countEl) countEl.textContent = `${configuredCount} configured`;
+
+            if (allTypes.length === 0) {
+                list.innerHTML = `<div class="empty-state"><div>NO TYPES AVAILABLE</div></div>`;
+                return;
+            }
+
+            list.innerHTML = allTypes.map(type => {
+                const webhookUrl = typeWebhooks[type] || '';
+                const isConfigured = !!webhookUrl;
+                const statusColor = isConfigured ? '#00ff9f' : 'rgba(128,128,128,0.5)';
+                const statusText = isConfigured ? '●' : '○';
+
+                return `
+                    <div class="contact-item" style="grid-template-columns: 100px 1fr auto auto; gap: 10px;">
+                        <div class="contact-type" style="display: flex; align-items: center; gap: 8px;">
+                            <span style="color: ${statusColor}; font-size: 10px;">${statusText}</span>
+                            ${escapeHtml(type)}
+                        </div>
+                        <input
+                            type="url"
+                            class="input-field"
+                            placeholder="https://n8n.example.com/webhook/..."
+                            value="${escapeHtml(webhookUrl)}"
+                            data-type="${escapeHtml(type)}"
+                            id="typeWebhook_${escapeHtml(type)}"
+                            style="padding: 8px 10px; font-size: 12px;"
+                        >
+                        <button class="btn btn-small" onclick="testTypeWebhook('${escapeHtml(type)}')" style="padding: 8px 12px;">TEST</button>
+                        <button class="btn btn-small" onclick="clearTypeWebhook('${escapeHtml(type)}')" style="padding: 8px 12px; border-color: #ff4757; color: #ff4757;">×</button>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function saveTypeWebhooks() {
+            // Collect all webhook URLs from inputs
+            const webhooks = {};
+            const inputs = document.querySelectorAll('[id^="typeWebhook_"]');
+
+            for (const input of inputs) {
+                const type = input.dataset.type;
+                const url = input.value.trim();
+
+                if (url) {
+                    // Validate URL format
+                    try {
+                        new URL(url);
+                        webhooks[type] = url;
+                    } catch {
+                        showToast(`INVALID URL FOR ${type}`, 'error');
+                        input.focus();
+                        return;
+                    }
+                }
+            }
+
+            try {
+                const response = await authFetch('/api/webhooks/types', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ typeWebhooks: webhooks })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    typeWebhooks = webhooks;
+                    renderTypeWebhooks();
+                    showToast('TYPE WEBHOOKS SAVED');
+                } else {
+                    showToast(data.error || 'SAVE FAILED', 'error');
+                }
+            } catch (error) {
+                showToast('CONNECTION ERROR', 'error');
+            }
+        }
+
+        async function testTypeWebhook(type) {
+            const input = document.getElementById(`typeWebhook_${type}`);
+            const url = input?.value?.trim();
+
+            if (!url) {
+                showToast(`NO URL SET FOR ${type}`, 'error');
+                return;
+            }
+
+            showToast(`TESTING ${type}...`);
+
+            try {
+                const response = await authFetch('/api/webhook/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ entityType: type })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    showToast(`${type} WEBHOOK OK`);
+                } else {
+                    showToast(`${type} TEST FAILED: ${data.error || 'Unknown'}`, 'error');
+                }
+            } catch (error) {
+                showToast('TEST FAILED', 'error');
+            }
+        }
+
+        function clearTypeWebhook(type) {
+            const input = document.getElementById(`typeWebhook_${type}`);
+            if (input) {
+                input.value = '';
+            }
+        }
+
         // Load data from server
         async function loadConfig() {
             try {
@@ -1632,6 +1798,9 @@
 
                     // Populate type select dropdowns
                     populateTypeSelects();
+
+                    // Update type webhooks list
+                    renderTypeWebhooks();
 
                     renderContacts();
                     renderGroups();
@@ -2268,6 +2437,7 @@
             loadRecentEvents();
             loadEventStats();
             loadBaileysStatus();
+            loadTypeWebhooks();
 
             // Auto-refresh data every 5 seconds
             refreshIntervals.push(setInterval(() => {
