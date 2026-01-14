@@ -504,7 +504,9 @@
         .event-sender-name {
             color: #00ff9f;
             font-weight: 600;
-            max-width: 150px;
+            max-width: 120px;
+            min-width: 60px;
+            flex-shrink: 0;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
@@ -512,12 +514,14 @@
 
         .event-msg-preview {
             flex: 1;
-            color: rgba(255,255,255,0.6);
-            font-size: 11px;
+            color: rgba(255,255,255,0.85);
+            font-size: 12px;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
             font-style: italic;
+            padding-left: 8px;
+            border-left: 1px solid rgba(255,255,255,0.2);
         }
 
         .event-msg-type-icon {

@@ -193,12 +193,19 @@ async function handleUpsert(payload, context) {
 
   if (!isAllowed) {
     statsService.increment('MESSAGES_UPSERT', 'filtered');
+    // Extract message content for logging even for filtered messages
+    const messageContent = extractMessageContent(data);
+    const messagePreview = messageContent.body.length > 50
+      ? messageContent.body.substring(0, 50) + '...'
+      : messageContent.body;
     statsService.logEvent({
       event: 'MESSAGES_UPSERT',
       source: sourceId,
       sourceType,
       senderName,
       action: 'filtered',
+      messagePreview,
+      messageType: messageContent.type,
       reason
     });
     logger.filter(sourceId, false, sourceType);
