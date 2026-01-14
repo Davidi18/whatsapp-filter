@@ -1068,6 +1068,38 @@
                 </div>
             </div>
 
+            <!-- Webhook Configuration -->
+            <div class="section collapsed" id="webhookSection">
+                <div class="section-header section-toggle" onclick="toggleSection(this)">
+                    <span><span class="toggle-icon">▼</span> WEBHOOK CONFIGURATION</span>
+                    <span id="webhookStatusBadge" class="baileys-status disconnected" style="font-size: 10px; padding: 4px 8px;">NOT SET</span>
+                </div>
+                <div class="section-content">
+                    <div id="webhookEnvWarning" class="hidden" style="background: rgba(255,165,0,0.1); border: 1px solid rgba(255,165,0,0.3); border-radius: 4px; padding: 10px; margin-bottom: 15px; font-size: 11px; color: #ffa500;">
+                        Webhook URL is set via environment variable and cannot be changed from UI
+                    </div>
+                    <div class="add-form" style="grid-template-columns: 1fr auto auto;">
+                        <div class="input-group">
+                            <div class="input-label">WEBHOOK URL (n8n)</div>
+                            <input
+                                type="url"
+                                class="input-field"
+                                placeholder="https://n8n.example.com/webhook/..."
+                                id="webhookUrlInput"
+                            >
+                        </div>
+                        <div class="input-group">
+                            <div class="input-label">&nbsp;</div>
+                            <button class="btn" onclick="saveWebhookUrl()">SAVE</button>
+                        </div>
+                        <div class="input-group">
+                            <div class="input-label">&nbsp;</div>
+                            <button class="btn btn-small" onclick="testWebhook()" style="padding: 12px 15px;">TEST</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Event Statistics -->
             <div class="section collapsed">
                 <div class="section-header section-toggle" onclick="toggleSection(this)">
@@ -1483,6 +1515,69 @@
             }
         }
 
+        // ============ WEBHOOK FUNCTIONS ============
+
+        async function saveWebhookUrl() {
+            const urlInput = document.getElementById('webhookUrlInput');
+            const url = urlInput.value.trim();
+
+            // Validate URL format if not empty
+            if (url) {
+                try {
+                    new URL(url);
+                } catch {
+                    showToast('INVALID URL FORMAT', 'error');
+                    urlInput.focus();
+                    return;
+                }
+            }
+
+            try {
+                const response = await authFetch('/api/webhook', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    showToast(url ? 'WEBHOOK SAVED' : 'WEBHOOK CLEARED');
+                    loadConfig(); // Refresh UI
+                } else {
+                    showToast(data.error || 'SAVE FAILED', 'error');
+                }
+            } catch (error) {
+                showToast('CONNECTION ERROR', 'error');
+            }
+        }
+
+        async function testWebhook() {
+            const urlInput = document.getElementById('webhookUrlInput');
+            if (!urlInput.value.trim()) {
+                showToast('NO WEBHOOK URL SET', 'error');
+                return;
+            }
+
+            showToast('TESTING...');
+
+            try {
+                const response = await authFetch('/api/webhook/test', {
+                    method: 'POST'
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    showToast('WEBHOOK TEST OK');
+                } else {
+                    showToast(`TEST FAILED: ${data.error || 'Unknown error'}`, 'error');
+                }
+            } catch (error) {
+                showToast('TEST FAILED', 'error');
+            }
+        }
+
         // Toggle section collapse
         function toggleSection(header) {
             header.closest('.section').classList.toggle('collapsed');
@@ -1505,6 +1600,36 @@
 
                     const webhookEl = document.getElementById('webhookStatus');
                     const webhookWarning = document.getElementById('webhookWarning');
+                    const webhookUrlInput = document.getElementById('webhookUrlInput');
+                    const webhookEnvWarning = document.getElementById('webhookEnvWarning');
+                    const webhookStatusBadge = document.getElementById('webhookStatusBadge');
+
+                    // Update webhook URL input
+                    if (webhookUrlInput) {
+                        webhookUrlInput.value = data.webhookUrl || '';
+                        webhookUrlInput.disabled = data.webhookFromEnv;
+                    }
+
+                    // Show/hide env warning
+                    if (webhookEnvWarning) {
+                        if (data.webhookFromEnv) {
+                            webhookEnvWarning.classList.remove('hidden');
+                        } else {
+                            webhookEnvWarning.classList.add('hidden');
+                        }
+                    }
+
+                    // Update webhook status badge in config section
+                    if (webhookStatusBadge) {
+                        if (data.webhookConfigured) {
+                            webhookStatusBadge.textContent = data.webhookFromEnv ? 'ENV' : 'CONFIGURED';
+                            webhookStatusBadge.className = 'baileys-status connected';
+                        } else {
+                            webhookStatusBadge.textContent = 'NOT SET';
+                            webhookStatusBadge.className = 'baileys-status disconnected';
+                        }
+                    }
+
                     if (data.webhookConfigured === false) {
                         webhookEl.textContent = 'NOT SET';
                         webhookEl.style.color = '#ffa500';

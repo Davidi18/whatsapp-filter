@@ -161,11 +161,16 @@ async function loadConfig() {
     const data = await fs.readFile(configPath, 'utf8');
     const savedConfig = JSON.parse(data);
 
-    // Merge with environment webhook URL (environment takes precedence)
+    // Environment webhook takes precedence over saved config
+    const webhookUrl = process.env.WEBHOOK_URL || savedConfig.webhookUrl || '';
+
     config = {
       ...savedConfig,
-      webhookUrl: process.env.WEBHOOK_URL
+      webhookUrl
     };
+
+    // Initialize webhook service with the URL
+    webhookService.init(webhookUrl);
 
     // Import legacy stats
     if (savedConfig.stats) {
@@ -174,7 +179,9 @@ async function loadConfig() {
 
     logger.info('Configuration loaded', {
       contacts: config.allowedNumbers?.length || 0,
-      groups: config.allowedGroups?.length || 0
+      groups: config.allowedGroups?.length || 0,
+      webhookConfigured: !!webhookUrl,
+      webhookSource: process.env.WEBHOOK_URL ? 'env' : (savedConfig.webhookUrl ? 'config' : 'none')
     });
   } catch (error) {
     if (error.code !== 'ENOENT') {
@@ -182,7 +189,8 @@ async function loadConfig() {
     } else {
       logger.info('No existing config found, using defaults');
     }
-    config.webhookUrl = process.env.WEBHOOK_URL;
+    config.webhookUrl = process.env.WEBHOOK_URL || '';
+    webhookService.init(config.webhookUrl);
   }
 
   // Set config for event router
@@ -197,12 +205,17 @@ async function saveConfig() {
     // Ensure config directory exists
     await fs.mkdir(path.dirname(configPath), { recursive: true });
 
-    // Don't save webhook URL to file (it comes from environment)
+    // Save webhook URL only if not set via environment
     const configToSave = {
       allowedNumbers: config.allowedNumbers,
       allowedGroups: config.allowedGroups,
       stats: statsService.getLegacyStats()
     };
+
+    // Only save webhookUrl if it wasn't set via environment
+    if (!process.env.WEBHOOK_URL && config.webhookUrl) {
+      configToSave.webhookUrl = config.webhookUrl;
+    }
 
     await fs.writeFile(configPath, JSON.stringify(configToSave, null, 2));
     logger.debug('Configuration saved');
@@ -604,6 +617,56 @@ app.get('/api/config', (req, res) => {
     webhookConfigured: webhookHealth.configured,
     webhookFromEnv: !!process.env.WEBHOOK_URL
   });
+});
+
+// Update webhook URL
+app.post('/api/webhook', async (req, res) => {
+  try {
+    // Check if webhook is locked by environment variable
+    if (process.env.WEBHOOK_URL) {
+      return res.status(403).json({
+        error: 'Webhook URL is set via environment variable and cannot be changed from UI',
+        source: 'env'
+      });
+    }
+
+    const { url } = req.body;
+
+    // Validate URL format (allow empty to clear)
+    if (url && typeof url === 'string' && url.trim()) {
+      try {
+        new URL(url);
+      } catch {
+        return res.status(400).json({ error: 'Invalid URL format' });
+      }
+    }
+
+    const webhookUrl = url?.trim() || '';
+    config.webhookUrl = webhookUrl;
+    webhookService.init(webhookUrl);
+    await saveConfig();
+
+    logger.info('Webhook URL updated', { configured: !!webhookUrl });
+
+    res.json({
+      success: true,
+      configured: !!webhookUrl,
+      url: webhookUrl
+    });
+  } catch (error) {
+    logger.error('Failed to update webhook URL', { error: error.message });
+    res.status(500).json({ error: 'Failed to update webhook URL' });
+  }
+});
+
+// Test webhook connection
+app.post('/api/webhook/test', async (req, res) => {
+  try {
+    const result = await webhookService.test();
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
 });
 
 // Update contacts (replace all)
