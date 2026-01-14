@@ -197,10 +197,15 @@
             border: 1px solid rgba(0,255,159,0.25);
             border-radius: 6px;
             background: rgba(0,0,0,0.15);
+            transition: border-color 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .section:hover {
+            border-color: rgba(0,255,159,0.4);
         }
 
         .section-header {
-            background: rgba(0,255,159,0.08);
+            background: linear-gradient(90deg, rgba(0,255,159,0.1) 0%, rgba(0,255,159,0.05) 100%);
             padding: 12px 18px;
             font-weight: 700;
             text-transform: uppercase;
@@ -224,69 +229,147 @@
             align-items: end;
         }
 
+        /* Webhook form: URL field + 2 buttons */
+        .add-form.form-webhook {
+            grid-template-columns: 1fr auto auto;
+        }
+
+        /* Group form: ID + Name + Type + Button */
+        .add-form.form-group {
+            grid-template-columns: 1.2fr 1fr 0.8fr auto;
+        }
+
         .add-form .btn {
             width: 100%;
-            padding: 12px 20px;
+            padding: 10px 20px;
         }
 
         .input-group {
             display: flex;
             flex-direction: column;
-            gap: 8px;
+            gap: 6px;
             text-align: left;
+        }
+
+        .input-group.no-label {
+            justify-content: flex-end;
         }
 
         .input-label {
-            font-size: 12px;
+            font-size: 11px;
             text-transform: uppercase;
             letter-spacing: 1px;
-            opacity: 0.8;
+            opacity: 0.7;
             text-align: left;
+            min-height: 14px;
+        }
+
+        .input-label:empty,
+        .input-label:blank {
+            display: none;
+        }
+
+        /* Hide labels that only contain whitespace */
+        .input-group.no-label .input-label {
+            display: none;
         }
 
         .input-field {
-            background: transparent;
-            border: 1px solid #00ff9f;
+            background: rgba(0,0,0,0.2);
+            border: 2px solid rgba(0,255,159,0.5);
             color: #00ff9f;
-            padding: 12px;
+            padding: 10px 12px;
             font-family: 'Orbitron', monospace;
-            font-size: 14px;
+            font-size: 13px;
             border-radius: 4px;
             outline: none;
             transition: all 0.3s ease;
             text-align: left;
+            height: 42px;
+            box-sizing: border-box;
         }
 
         .input-field:focus {
             border-color: #00ff9f;
-            box-shadow: 0 0 10px rgba(0,255,159,0.3);
+            box-shadow: 0 0 10px rgba(0,255,159,0.3), inset 0 0 10px rgba(0,255,159,0.05);
             background: rgba(0,255,159,0.05);
         }
 
+        .input-field:hover:not(:focus) {
+            border-color: rgba(0,255,159,0.7);
+        }
+
         .input-field::placeholder {
-            color: rgba(0,255,159,0.5);
+            color: rgba(0,255,159,0.4);
+            font-size: 12px;
+        }
+
+        /* Select element specific styling */
+        select.input-field {
+            appearance: none;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2300ff9f' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 12px center;
+            padding-right: 35px;
+            cursor: pointer;
+        }
+
+        select.input-field option {
+            background: #1a2332;
+            color: #00ff9f;
+            padding: 10px;
+        }
+
+        /* Search input styling */
+        .input-field.search-input,
+        .input-field[placeholder*="Search"] {
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2300ff9f' stroke-width='2' stroke-opacity='0.5'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.35-4.35'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: 12px center;
+            padding-left: 40px;
         }
 
         .btn {
-            background: transparent;
+            background: rgba(0,255,159,0.05);
             border: 2px solid #00ff9f;
             color: #00ff9f;
-            padding: 12px 15px;
+            padding: 10px 15px;
             font-family: 'Orbitron', monospace;
             font-weight: 700;
             text-transform: uppercase;
             letter-spacing: 1px;
             cursor: pointer;
             border-radius: 4px;
-            transition: all 0.3s ease;
+            transition: all 0.2s ease;
             white-space: nowrap;
             min-width: 80px;
+            height: 42px;
+            box-sizing: border-box;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(0,255,159,0.2), transparent);
+            transition: left 0.4s ease;
+        }
+
+        .btn:hover::before {
+            left: 100%;
         }
 
         .btn:hover {
             background: #00ff9f;
             color: #0d1b2a;
-            box-shadow: 0 0 15px rgba(0,255,159,0.5);
+            box-shadow: 0 0 20px rgba(0,255,159,0.5), inset 0 0 20px rgba(255,255,255,0.1);
         }
 
         .btn:active {
@@ -310,37 +393,68 @@
             grid-template-columns: 1fr 1fr 100px 60px;
             align-items: center;
             gap: 15px;
-            padding: 15px;
-            background: rgba(0,255,159,0.03);
-            border: 1px solid rgba(0,255,159,0.3);
-            border-radius: 4px;
-            transition: all 0.3s ease;
+            padding: 14px 16px;
+            background: rgba(0,255,159,0.02);
+            border: 1px solid rgba(0,255,159,0.2);
+            border-radius: 6px;
+            transition: all 0.2s ease;
+            border-left: 3px solid transparent;
         }
 
         .contact-item:hover {
-            background: rgba(0,255,159,0.08);
-            border-color: #00ff9f;
+            background: rgba(0,255,159,0.06);
+            border-color: rgba(0,255,159,0.4);
+            border-left-color: #00ff9f;
+            transform: translateX(3px);
         }
 
         .contact-number {
-            font-family: monospace;
-            font-size: 14px;
-            font-weight: 700;
+            font-family: 'Orbitron', monospace;
+            font-size: 13px;
+            font-weight: 600;
             text-align: left;
+            color: #00ff9f;
         }
 
         .contact-name {
-            font-size: 14px;
+            font-size: 13px;
             font-weight: 400;
             text-align: left;
+            color: rgba(255,255,255,0.9);
         }
 
         .contact-type {
-            font-size: 12px;
+            font-size: 10px;
             text-transform: uppercase;
             letter-spacing: 1px;
-            opacity: 0.7;
-            text-align: left;
+            text-align: center;
+            padding: 4px 8px;
+            border-radius: 3px;
+            background: rgba(0,255,159,0.1);
+            border: 1px solid rgba(0,255,159,0.3);
+        }
+
+        .contact-type.type-vip {
+            background: rgba(255,215,0,0.15);
+            border-color: rgba(255,215,0,0.4);
+            color: #ffd700;
+        }
+
+        .contact-type.type-business {
+            background: rgba(0,200,255,0.15);
+            border-color: rgba(0,200,255,0.4);
+            color: #00c8ff;
+        }
+
+        .contact-type.type-temp {
+            background: rgba(255,165,0,0.15);
+            border-color: rgba(255,165,0,0.4);
+            color: #ffa500;
+        }
+
+        /* Group items have different layout */
+        .contact-item.group-item {
+            grid-template-columns: 1fr 1fr auto 60px;
         }
 
         .remove-btn {
@@ -504,7 +618,9 @@
         .event-sender-name {
             color: #00ff9f;
             font-weight: 600;
-            max-width: 150px;
+            max-width: 120px;
+            min-width: 60px;
+            flex-shrink: 0;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
@@ -512,12 +628,14 @@
 
         .event-msg-preview {
             flex: 1;
-            color: rgba(255,255,255,0.6);
-            font-size: 11px;
+            color: rgba(255,255,255,0.85);
+            font-size: 12px;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
             font-style: italic;
+            padding-left: 8px;
+            border-left: 1px solid rgba(255,255,255,0.2);
         }
 
         .event-msg-type-icon {
@@ -947,6 +1065,109 @@
             background: #ffa500;
             color: #0d1b2a;
         }
+
+        /* Event Detail Modal */
+        .event-modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .event-modal-overlay.active {
+            display: flex;
+        }
+
+        .event-modal {
+            background: #1a2332;
+            border: 2px solid #00ff9f;
+            border-radius: 8px;
+            max-width: 600px;
+            width: 90%;
+            max-height: 80vh;
+            overflow: hidden;
+            box-shadow: 0 0 30px rgba(0, 255, 159, 0.4);
+        }
+
+        .event-modal-header {
+            background: #00ff9f;
+            color: #0d1b2a;
+            padding: 12px 20px;
+            font-weight: 700;
+            font-size: 14px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .event-modal-close {
+            background: none;
+            border: none;
+            color: #0d1b2a;
+            font-size: 20px;
+            cursor: pointer;
+            font-weight: bold;
+            padding: 0 5px;
+        }
+
+        .event-modal-close:hover {
+            opacity: 0.7;
+        }
+
+        .event-modal-body {
+            padding: 20px;
+            overflow-y: auto;
+            max-height: calc(80vh - 50px);
+        }
+
+        .event-modal-row {
+            display: flex;
+            margin-bottom: 12px;
+            font-size: 12px;
+        }
+
+        .event-modal-label {
+            color: rgba(255, 255, 255, 0.5);
+            min-width: 100px;
+            flex-shrink: 0;
+        }
+
+        .event-modal-value {
+            color: #fff;
+            word-break: break-word;
+        }
+
+        .event-modal-message {
+            background: rgba(0, 255, 159, 0.1);
+            border: 1px solid rgba(0, 255, 159, 0.3);
+            border-radius: 6px;
+            padding: 15px;
+            margin-top: 15px;
+            font-family: monospace;
+            font-size: 13px;
+            line-height: 1.5;
+            color: #fff;
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .event-card {
+            cursor: pointer;
+            transition: transform 0.1s, box-shadow 0.1s;
+        }
+
+        .event-card:hover {
+            transform: translateX(5px);
+            box-shadow: -3px 0 0 #00ff9f;
+        }
     </style>
 </head>
 <body>
@@ -1078,7 +1299,7 @@
                     <div id="webhookEnvWarning" class="hidden" style="background: rgba(255,165,0,0.1); border: 1px solid rgba(255,165,0,0.3); border-radius: 4px; padding: 10px; margin-bottom: 15px; font-size: 11px; color: #ffa500;">
                         Webhook URL is set via environment variable and cannot be changed from UI
                     </div>
-                    <div class="add-form" style="grid-template-columns: 1fr auto auto;">
+                    <div class="add-form form-webhook">
                         <div class="input-group">
                             <div class="input-label">WEBHOOK URL (n8n)</div>
                             <input
@@ -1088,13 +1309,11 @@
                                 id="webhookUrlInput"
                             >
                         </div>
-                        <div class="input-group">
-                            <div class="input-label">&nbsp;</div>
+                        <div class="input-group no-label">
                             <button class="btn" onclick="saveWebhookUrl()">SAVE</button>
                         </div>
-                        <div class="input-group">
-                            <div class="input-label">&nbsp;</div>
-                            <button class="btn btn-small" onclick="testWebhook()" style="padding: 12px 15px;">TEST</button>
+                        <div class="input-group no-label">
+                            <button class="btn" onclick="testWebhook()">TEST</button>
                         </div>
                     </div>
                 </div>
@@ -1163,8 +1382,7 @@
                                 <option value="TEMP">TEMP</option>
                             </select>
                         </div>
-                        <div class="input-group">
-                            <div class="input-label">&nbsp;</div>
+                        <div class="input-group no-label">
                             <button class="btn" onclick="addContact()">ADD</button>
                         </div>
                     </div>
@@ -1190,7 +1408,7 @@
             <div class="section">
                 <div class="section-header">+ ADD NEW GROUP</div>
                 <div class="section-content">
-                    <div class="add-form" style="grid-template-columns: 1fr 1fr auto;">
+                    <div class="add-form form-group">
                         <div class="input-group">
                             <div class="input-label">GROUP ID</div>
                             <input
@@ -1215,8 +1433,7 @@
                                 <!-- Populated dynamically -->
                             </select>
                         </div>
-                        <div class="input-group">
-                            <div class="input-label">&nbsp;</div>
+                        <div class="input-group no-label">
                             <button class="btn" onclick="addGroup()">ADD</button>
                         </div>
                     </div>
@@ -1987,7 +2204,7 @@
                 return;
             }
 
-            list.innerHTML = events.map(e => {
+            list.innerHTML = events.map((e, index) => {
                 const time = new Date(e.timestamp);
                 const timeStr = time.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
                 const action = (e.action || 'logged').toLowerCase();
@@ -2009,8 +2226,11 @@
                     'logged': 'Event logged only'
                 }[action] || '';
 
+                // Store event data for modal
+                const eventData = encodeURIComponent(JSON.stringify(e));
+
                 return `
-                    <div class="event-card ${sourceTypeClass}">
+                    <div class="event-card ${sourceTypeClass}" onclick="showEventModal('${eventData}')">
                         <div class="event-card-header">
                             <span class="event-time">${timeStr}</span>
                             <span class="event-badge ${action}" title="${actionTitle}">${action}</span>
@@ -2041,6 +2261,88 @@
             };
             return icons[type] || '';
         }
+
+        // Show event detail modal
+        function showEventModal(encodedData) {
+            const event = JSON.parse(decodeURIComponent(encodedData));
+            const modal = document.getElementById('eventModal');
+            const body = document.getElementById('eventModalBody');
+
+            const time = new Date(event.timestamp);
+            const timeStr = time.toLocaleString('he-IL', {
+                year: 'numeric', month: '2-digit', day: '2-digit',
+                hour: '2-digit', minute: '2-digit', second: '2-digit'
+            });
+
+            const msgTypeIcon = getMessageTypeIcon(event.messageType);
+            const actionColors = {
+                'forwarded': '#00ff9f',
+                'stored': '#00c8ff',
+                'filtered': '#ffa500',
+                'failed': '#ff4757',
+                'logged': '#808080'
+            };
+            const actionColor = actionColors[event.action] || '#808080';
+
+            body.innerHTML = `
+                <div class="event-modal-row">
+                    <span class="event-modal-label">TIME</span>
+                    <span class="event-modal-value">${escapeHtml(timeStr)}</span>
+                </div>
+                <div class="event-modal-row">
+                    <span class="event-modal-label">STATUS</span>
+                    <span class="event-modal-value" style="color: ${actionColor}; font-weight: bold;">${escapeHtml((event.action || 'logged').toUpperCase())}</span>
+                </div>
+                <div class="event-modal-row">
+                    <span class="event-modal-label">FROM</span>
+                    <span class="event-modal-value">${escapeHtml(event.senderName || event.source || 'Unknown')}</span>
+                </div>
+                <div class="event-modal-row">
+                    <span class="event-modal-label">SOURCE</span>
+                    <span class="event-modal-value">${escapeHtml(event.source || '-')}</span>
+                </div>
+                <div class="event-modal-row">
+                    <span class="event-modal-label">TYPE</span>
+                    <span class="event-modal-value">${msgTypeIcon} ${escapeHtml(event.messageType || 'text')}</span>
+                </div>
+                ${event.sourceType ? `
+                <div class="event-modal-row">
+                    <span class="event-modal-label">SOURCE TYPE</span>
+                    <span class="event-modal-value">${escapeHtml(event.sourceType.toUpperCase())}</span>
+                </div>
+                ` : ''}
+                ${event.reason ? `
+                <div class="event-modal-row">
+                    <span class="event-modal-label">REASON</span>
+                    <span class="event-modal-value" style="color: #ffa500;">${escapeHtml(event.reason)}</span>
+                </div>
+                ` : ''}
+                ${event.error ? `
+                <div class="event-modal-row">
+                    <span class="event-modal-label">ERROR</span>
+                    <span class="event-modal-value" style="color: #ff4757;">${escapeHtml(event.error)}</span>
+                </div>
+                ` : ''}
+                ${event.messageBody || event.messagePreview ? `
+                <div class="event-modal-message">${escapeHtml(event.messageBody || event.messagePreview)}</div>
+                ` : '<div class="event-modal-message" style="color: rgba(255,255,255,0.4); font-style: italic;">No message content</div>'}
+            `;
+
+            modal.classList.add('active');
+        }
+
+        // Close event detail modal
+        function closeEventModal(e) {
+            if (e && e.target !== e.currentTarget) return;
+            document.getElementById('eventModal').classList.remove('active');
+        }
+
+        // Close modal on Escape key
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                closeEventModal();
+            }
+        });
 
         // Escape HTML to prevent XSS
         function escapeHtml(text) {
@@ -2153,11 +2455,12 @@
 
             list.innerHTML = filtered.map((contact, index) => {
                 const realIndex = contacts.indexOf(contact);
+                const typeClass = `type-${(contact.type || 'personal').toLowerCase()}`;
                 return `
                     <div class="contact-item">
                         <div class="contact-number">${escapeHtml(contact.phone)}</div>
                         <div class="contact-name">${escapeHtml(contact.name)}</div>
-                        <div class="contact-type">${escapeHtml(contact.type)}</div>
+                        <div class="contact-type ${typeClass}">${escapeHtml(contact.type)}</div>
                         <button class="remove-btn" onclick="removeContact(${realIndex})" title="Remove contact">×</button>
                     </div>
                 `;
@@ -2279,9 +2582,9 @@
 
             list.innerHTML = filtered.map((group, index) => {
                 const realIndex = groups.indexOf(group);
-                const typeClass = (group.type || 'GENERAL').toLowerCase();
+                const typeClass = `type-${(group.type || 'general').toLowerCase()}`;
                 return `
-                    <div class="contact-item" style="grid-template-columns: 1fr 1fr auto 60px;">
+                    <div class="contact-item group-item">
                         <div class="contact-number">${escapeHtml(group.groupId)}</div>
                         <div class="contact-name">${escapeHtml(group.name)}</div>
                         <div class="contact-type ${typeClass}">${escapeHtml(group.type || 'GENERAL')}</div>
@@ -2465,5 +2768,17 @@
             }
         })();
     </script>
+
+    <!-- Event Detail Modal -->
+    <div class="event-modal-overlay" id="eventModal" onclick="closeEventModal(event)">
+        <div class="event-modal" onclick="event.stopPropagation()">
+            <div class="event-modal-header">
+                <span>EVENT DETAILS</span>
+                <button class="event-modal-close" onclick="closeEventModal()">&times;</button>
+            </div>
+            <div class="event-modal-body" id="eventModalBody">
+            </div>
+        </div>
+    </div>
 </body>
 </html>
