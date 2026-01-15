@@ -647,11 +647,6 @@
             color: #00ff9f;
         }
 
-        .event-badge.stored {
-            background: rgba(0, 200, 255, 0.15);
-            color: #00c8ff;
-        }
-
         .event-badge.filtered {
             background: rgba(255, 165, 0, 0.15);
             color: #ffa500;
@@ -1299,7 +1294,7 @@
             <div class="connection-banner status-connecting hidden" id="webhookWarning" style="margin-bottom: 15px;">
                 <span style="font-size: 18px;">&#9888;</span>
                 <span class="status-text" style="color: #ffa500;">NO WEBHOOK CONFIGURED</span>
-                <span class="status-phone" style="color: rgba(255,165,0,0.8);">Messages will be stored locally only, not forwarded to n8n</span>
+                <span class="status-phone" style="color: rgba(255,165,0,0.8);">Messages will not be forwarded to n8n</span>
             </div>
 
             <div class="status-bar">
@@ -1343,7 +1338,6 @@
                     <div class="filter-tabs">
                         <button class="filter-tab active" data-filter="all" onclick="filterEvents('all')">ALL</button>
                         <button class="filter-tab" data-filter="forwarded" onclick="filterEvents('forwarded')">FORWARDED</button>
-                        <button class="filter-tab" data-filter="stored" onclick="filterEvents('stored')">STORED</button>
                         <button class="filter-tab" data-filter="filtered" onclick="filterEvents('filtered')">FILTERED</button>
                         <span style="opacity: 0.3; margin: 0 5px;">|</span>
                         <button class="filter-tab" data-filter="group" onclick="filterEvents('group')" style="border-color: #a855f7; color: #a855f7;">GROUPS</button>
@@ -2127,7 +2121,7 @@
                     if (data.webhookConfigured === false) {
                         webhookEl.textContent = 'NOT SET';
                         webhookEl.style.color = '#ffa500';
-                        webhookEl.title = 'No webhook URL configured - messages will be stored locally only';
+                        webhookEl.title = 'No webhook URL configured - messages will not be forwarded';
                         webhookWarning.classList.remove('hidden');
                     } else if (data.webhookFromEnv) {
                         webhookEl.textContent = 'ENV';
@@ -2288,7 +2282,6 @@
                 // Add tooltips for different statuses
                 const actionTitle = {
                     'forwarded': 'Message was forwarded to webhook (n8n)',
-                    'stored': 'Message saved locally (no webhook configured)',
                     'filtered': 'Message blocked - sender not in allowed list',
                     'failed': 'Failed to forward to webhook',
                     'logged': 'Event logged only'
@@ -2345,7 +2338,6 @@
             const msgTypeIcon = getMessageTypeIcon(event.messageType);
             const actionColors = {
                 'forwarded': '#00ff9f',
-                'stored': '#00c8ff',
                 'filtered': '#ffa500',
                 'failed': '#ff4757',
                 'logged': '#808080'
