@@ -231,7 +231,7 @@ async function handleUpsert(payload, context) {
   // Check if webhook is configured
   const webhookHealth = webhookService.getHealth();
 
-  // If no webhook configured, just mark as stored (Baileys-only mode)
+  // If no webhook configured, message is allowed but nothing to forward to
   if (!webhookHealth.configured) {
     statsService.increment('MESSAGES_UPSERT', 'forwarded'); // Count as success
     statsService.logEvent({
@@ -239,13 +239,13 @@ async function handleUpsert(payload, context) {
       source: sourceId,
       sourceType,
       senderName,
-      action: 'stored',
+      action: 'forwarded',
       messagePreview,
       messageBody: messageContent.body,
       messageType: messageContent.type
     });
     logger.filter(sourceId, true, sourceType);
-    return { action: 'stored', source: sourceId, sourceType };
+    return { action: 'forwarded', source: sourceId, sourceType };
   }
 
   // Forward to n8n (with type-based routing)
@@ -402,9 +402,9 @@ async function handleSend(payload, context) {
     }
   }
 
-  // Check if webhook forwarding is enabled and configured
+  // Forward to webhook if configured (outgoing messages to allowed contacts are always forwarded)
   const webhookHealth = webhookService.getHealth();
-  if (process.env.ENABLE_OUTGOING_MESSAGES === 'true' && webhookHealth.configured) {
+  if (webhookHealth.configured) {
     try {
       await webhookService.forward(payload, { event: 'SEND_MESSAGE' });
       statsService.increment('SEND_MESSAGE', 'forwarded');
@@ -421,22 +421,35 @@ async function handleSend(payload, context) {
       return { action: 'forwarded' };
     } catch (error) {
       statsService.increment('SEND_MESSAGE', 'failed');
+      statsService.logEvent({
+        event: 'SEND_MESSAGE',
+        source: sourceId,
+        sourceType,
+        senderName: 'Me → ' + recipientName,
+        action: 'failed',
+        messagePreview,
+        messageBody: messageContent.body,
+        messageType: messageContent.type,
+        error: error.message
+      });
       logger.error('Failed to forward outgoing message', { error: error.message });
       return { action: 'failed', error: error.message };
     }
   }
 
+  // No webhook configured - just log
+  statsService.increment('SEND_MESSAGE', 'forwarded'); // Count as success (no webhook = nothing to forward to)
   statsService.logEvent({
     event: 'SEND_MESSAGE',
     source: sourceId,
     sourceType,
     senderName: 'Me → ' + recipientName,
-    action: 'stored',
+    action: 'forwarded',
     messagePreview,
     messageBody: messageContent.body,
     messageType: messageContent.type
   });
-  return { action: 'stored' };
+  return { action: 'forwarded' };
 }
 
 module.exports = {
