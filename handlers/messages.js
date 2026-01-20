@@ -26,7 +26,7 @@ function setConfig(cfg) {
  * entityType is the type of the contact/group (VIP, BUSINESS, etc.)
  */
 function checkAllowed(remoteJid) {
-  const { sourceId, sourceType, isStatusBroadcast, isLid } = parseRemoteJid(remoteJid);
+  const { sourceId, sourceType, isStatusBroadcast } = parseRemoteJid(remoteJid);
 
   if (isStatusBroadcast) {
     return { isAllowed: false, sourceId: '', sourceType: 'status', entityType: null, reason: 'status_broadcast' };
@@ -64,21 +64,9 @@ function checkAllowed(remoteJid) {
 
   // Personal message - normalize both sides for comparison
   const normalizedSourceId = normalizePhone(sourceId);
-
-  // Find contact by phone number OR by LID (WhatsApp Linked ID)
-  let matchedContact;
-  if (isLid) {
-    // Message came with LID format - check both lid field and phone field
-    matchedContact = config?.allowedNumbers?.find(c =>
-      c.lid === sourceId || normalizePhone(c.phone) === normalizedSourceId
-    );
-  } else {
-    // Standard phone format - check phone and also lid field in case contact has LID stored
-    matchedContact = config?.allowedNumbers?.find(c =>
-      normalizePhone(c.phone) === normalizedSourceId || c.lid === sourceId
-    );
-  }
-
+  const matchedContact = config?.allowedNumbers?.find(c =>
+    normalizePhone(c.phone) === normalizedSourceId
+  );
   const isAllowed = !!matchedContact;
 
   // Debug logging for phone matching
@@ -86,11 +74,9 @@ function checkAllowed(remoteJid) {
     logger.debug('Phone match failed', {
       incoming: sourceId,
       normalized: normalizedSourceId,
-      isLid,
       configuredSample: config.allowedNumbers.slice(0, 3).map(c => ({
         original: c.phone,
-        normalized: normalizePhone(c.phone),
-        lid: c.lid || null
+        normalized: normalizePhone(c.phone)
       }))
     });
   }
