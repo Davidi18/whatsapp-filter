@@ -215,25 +215,31 @@ async function handleIncomingMessage(msg) {
     const messageContent = msg.message;
     if (!messageContent) return;
 
-    // Handle LID format - try to resolve to phone number
-    if (remoteJid.includes('@lid') && socket) {
-      // Try to get phone number from Baileys store/contacts
-      const lidId = remoteJid.replace('@lid', '');
+    // Handle LID format - log full message structure to understand what Baileys receives
+    if (remoteJid.includes('@lid')) {
+      logger.info('LID message received - full structure:', {
+        remoteJid,
+        keyFields: msg.key,
+        pushName: msg.pushName,
+        verifiedBizName: msg.verifiedBizName,
+        participant: msg.participant,
+        // Check for phone number in various possible locations
+        msgTopLevelKeys: Object.keys(msg),
+        messageKeys: msg.message ? Object.keys(msg.message) : [],
+        // Check if there's a senderKeyDistributionMessage with sender info
+        senderKeyDist: msg.message?.senderKeyDistributionMessage,
+        // Check message context
+        contextInfo: msg.message?.extendedTextMessage?.contextInfo ||
+                     msg.message?.conversation?.contextInfo
+      });
 
-      // Check if socket has contact info with phone number
+      // Try to resolve LID to phone number
+      const lidId = remoteJid.replace('@lid', '');
       try {
-        // Method 1: Check if there's a phone number in the signal store
         const phoneJid = await resolvePhoneFromLid(lidId);
         if (phoneJid) {
-          logger.debug('Resolved LID to phone', { lid: lidId, phone: phoneJid });
+          logger.info('Resolved LID to phone', { lid: lidId, phone: phoneJid });
           remoteJid = phoneJid;
-        } else {
-          logger.debug('Could not resolve LID to phone', {
-            lid: lidId,
-            msgKeys: Object.keys(msg),
-            keyKeys: Object.keys(msg.key),
-            hasVerifiedBizName: !!msg.verifiedBizName
-          });
         }
       } catch (resolveErr) {
         logger.debug('LID resolution failed', { error: resolveErr.message });
