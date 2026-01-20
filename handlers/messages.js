@@ -198,6 +198,19 @@ async function handleUpsert(payload, context) {
     const messagePreview = messageContent.body.length > 50
       ? messageContent.body.substring(0, 50) + '...'
       : messageContent.body;
+
+    // Debug: Log full payload structure to help identify phone number location
+    logger.debug('Filtered message full payload', {
+      remoteJid,
+      key: data.key,
+      pushName: data.pushName,
+      participant: data.participant,
+      sender: data.sender,
+      verifiedBizName: data.verifiedBizName,
+      messageContextInfo: data.message?.extendedTextMessage?.contextInfo,
+      allTopLevelKeys: Object.keys(data)
+    });
+
     statsService.logEvent({
       event: 'MESSAGES_UPSERT',
       source: sourceId,
