@@ -842,7 +842,7 @@ app.post('/api/contacts', async (req, res) => {
 // Add single contact
 app.post('/api/contacts/add', async (req, res) => {
   try {
-    const { phone, name, type } = req.body;
+    const { phone, name, type, lid } = req.body;
 
     if (!phone || !name || !type) {
       return res.status(400).json({ error: 'Missing required fields: phone, name, type' });
@@ -860,11 +860,19 @@ app.post('/api/contacts/add', async (req, res) => {
       return res.status(400).json({ error: 'Invalid type. Must be: PERSONAL, BUSINESS, VIP, or TEMP' });
     }
 
+    // Validate LID format if provided (numeric string, typically 14-20 digits)
+    if (lid && (typeof lid !== 'string' || !/^\d{10,25}$/.test(lid))) {
+      return res.status(400).json({ error: 'Invalid LID format. Must be 10-25 digits.' });
+    }
+
     if (config.allowedNumbers.some(c => c.phone === phone)) {
       return res.status(409).json({ error: 'Contact already exists' });
     }
 
     const newContact = { phone, name, type };
+    if (lid) {
+      newContact.lid = lid;
+    }
     config.allowedNumbers.push(newContact);
     eventRouter.setConfig(config);
     await saveConfig();
@@ -892,7 +900,7 @@ app.get('/api/contacts/:phone', (req, res) => {
 app.put('/api/contacts/:phone', async (req, res) => {
   try {
     const phone = req.params.phone;
-    const { name, type } = req.body;
+    const { name, type, lid } = req.body;
 
     const contactIndex = config.allowedNumbers.findIndex(c => c.phone === phone);
     if (contactIndex === -1) {
@@ -913,6 +921,17 @@ app.put('/api/contacts/:phone', async (req, res) => {
         return res.status(400).json({ error: 'Invalid type. Must be: PERSONAL, BUSINESS, VIP, or TEMP' });
       }
       contact.type = type;
+    }
+
+    // Handle LID field - can be set, updated, or removed (empty string removes it)
+    if (lid !== undefined) {
+      if (lid === '' || lid === null) {
+        delete contact.lid;
+      } else if (typeof lid === 'string' && /^\d{10,25}$/.test(lid)) {
+        contact.lid = lid;
+      } else {
+        return res.status(400).json({ error: 'Invalid LID format. Must be 10-25 digits or empty to remove.' });
+      }
     }
 
     eventRouter.setConfig(config);

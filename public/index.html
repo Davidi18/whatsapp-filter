@@ -389,8 +389,8 @@
         }
 
         .contact-item {
-            display: grid;
-            grid-template-columns: 1fr 1fr 100px 60px;
+            display: flex;
+            justify-content: space-between;
             align-items: center;
             gap: 15px;
             padding: 14px 16px;
@@ -408,6 +408,21 @@
             transform: translateX(3px);
         }
 
+        .contact-info {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .contact-actions {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-shrink: 0;
+        }
+
         .contact-number {
             font-family: 'Orbitron', monospace;
             font-size: 13px;
@@ -421,6 +436,32 @@
             font-weight: 400;
             text-align: left;
             color: rgba(255,255,255,0.9);
+        }
+
+        .contact-lid {
+            font-family: 'Orbitron', monospace;
+            font-size: 10px;
+            color: rgba(168, 85, 247, 0.8);
+            text-align: left;
+        }
+
+        .lid-btn {
+            font-size: 9px;
+            padding: 4px 8px;
+            background: rgba(168, 85, 247, 0.15);
+            border: 1px solid rgba(168, 85, 247, 0.4);
+            color: #a855f7;
+            border-radius: 3px;
+            cursor: pointer;
+            font-family: 'Orbitron', monospace;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            transition: all 0.2s ease;
+        }
+
+        .lid-btn:hover {
+            background: rgba(168, 85, 247, 0.25);
+            border-color: rgba(168, 85, 247, 0.6);
         }
 
         .contact-type {
@@ -858,27 +899,33 @@
             }
 
             .contact-item {
-                grid-template-columns: 1fr;
+                flex-direction: column;
+                align-items: stretch;
                 gap: 10px;
                 text-align: left;
                 padding: 20px;
             }
 
-            .contact-item > div {
-                padding: 5px 0;
+            .contact-info {
+                padding-bottom: 10px;
                 border-bottom: 1px solid rgba(0,255,159,0.2);
             }
 
-            .contact-item > div:last-child {
-                border-bottom: none;
-                text-align: center;
-                padding-top: 15px;
+            .contact-actions {
+                flex-wrap: wrap;
+                justify-content: center;
+                gap: 8px;
             }
 
             .remove-btn {
                 width: 100%;
                 height: 45px;
                 margin-top: 10px;
+            }
+
+            .lid-btn {
+                flex: 1;
+                padding: 8px 12px;
             }
 
             .connection-banner {
@@ -1433,6 +1480,16 @@
                                 class="input-field"
                                 placeholder="CLIENT NAME"
                                 id="nameInput"
+                            >
+                        </div>
+                        <div class="input-group">
+                            <div class="input-label">LID (OPTIONAL)</div>
+                            <input
+                                type="text"
+                                class="input-field"
+                                placeholder="WhatsApp Linked ID"
+                                id="lidInput"
+                                title="WhatsApp Linked ID - found in filtered message SOURCE field"
                             >
                         </div>
                         <div class="input-group">
@@ -2498,7 +2555,8 @@
                 const term = searchTerm.toLowerCase();
                 filtered = contacts.filter(c =>
                     c.phone.toLowerCase().includes(term) ||
-                    c.name.toLowerCase().includes(term)
+                    c.name.toLowerCase().includes(term) ||
+                    (c.lid && c.lid.toLowerCase().includes(term))
                 );
             }
 
@@ -2516,29 +2574,45 @@
             list.innerHTML = filtered.map((contact, index) => {
                 const realIndex = contacts.indexOf(contact);
                 const typeClass = `type-${(contact.type || 'personal').toLowerCase()}`;
+                const lidDisplay = contact.lid ? `<div class="contact-lid" title="WhatsApp Linked ID">LID: ${escapeHtml(contact.lid)}</div>` : '';
+                const lidBtnText = contact.lid ? 'EDIT LID' : 'ADD LID';
                 return `
                     <div class="contact-item">
-                        <div class="contact-number">${escapeHtml(contact.phone)}</div>
-                        <div class="contact-name">${escapeHtml(contact.name)}</div>
-                        <select class="contact-type-select ${typeClass}" onchange="updateContactType(${realIndex}, this.value)" title="Click to change type">
-                            <option value="PERSONAL" ${contact.type === 'PERSONAL' ? 'selected' : ''}>PERSONAL</option>
-                            <option value="BUSINESS" ${contact.type === 'BUSINESS' ? 'selected' : ''}>BUSINESS</option>
-                            <option value="VIP" ${contact.type === 'VIP' ? 'selected' : ''}>VIP</option>
-                            <option value="TEMP" ${contact.type === 'TEMP' ? 'selected' : ''}>TEMP</option>
-                        </select>
-                        <button class="remove-btn" onclick="removeContact(${realIndex})" title="Remove contact">×</button>
+                        <div class="contact-info">
+                            <div class="contact-number">${escapeHtml(contact.phone)}</div>
+                            <div class="contact-name">${escapeHtml(contact.name)}</div>
+                            ${lidDisplay}
+                        </div>
+                        <div class="contact-actions">
+                            <button class="lid-btn" onclick="editContactLid(${realIndex})" title="Edit WhatsApp Linked ID">${lidBtnText}</button>
+                            <select class="contact-type-select ${typeClass}" onchange="updateContactType(${realIndex}, this.value)" title="Click to change type">
+                                <option value="PERSONAL" ${contact.type === 'PERSONAL' ? 'selected' : ''}>PERSONAL</option>
+                                <option value="BUSINESS" ${contact.type === 'BUSINESS' ? 'selected' : ''}>BUSINESS</option>
+                                <option value="VIP" ${contact.type === 'VIP' ? 'selected' : ''}>VIP</option>
+                                <option value="TEMP" ${contact.type === 'TEMP' ? 'selected' : ''}>TEMP</option>
+                            </select>
+                            <button class="remove-btn" onclick="removeContact(${realIndex})" title="Remove contact">×</button>
+                        </div>
                     </div>
                 `;
             }).join('');
         }
 
+        function validateLid(lid) {
+            if (!lid) return true; // LID is optional
+            const lidRegex = /^\d{10,25}$/;
+            return lidRegex.test(lid);
+        }
+
         async function addContact() {
             const phoneInput = document.getElementById('phoneInput');
             const nameInput = document.getElementById('nameInput');
+            const lidInput = document.getElementById('lidInput');
             const typeInput = document.getElementById('typeInput');
 
             let phone = phoneInput.value.trim();
             let name = nameInput.value.trim();
+            let lid = lidInput.value.trim();
             const type = typeInput.value;
 
             if (!phone || !name) {
@@ -2558,6 +2632,16 @@
                 return;
             }
 
+            // Validate LID if provided - extract digits only from @lid format
+            if (lid) {
+                lid = lid.replace('@lid', '').replace(/\D/g, '');
+                if (!validateLid(lid)) {
+                    showToast('INVALID LID FORMAT', 'error');
+                    lidInput.focus();
+                    return;
+                }
+            }
+
             phone = sanitizeInput(phone);
             name = sanitizeInput(name);
 
@@ -2567,6 +2651,9 @@
             }
 
             const newContact = { phone, name, type };
+            if (lid) {
+                newContact.lid = lid;
+            }
             contacts.push(newContact);
 
             try {
@@ -2574,6 +2661,7 @@
 
                 phoneInput.value = '';
                 nameInput.value = '';
+                lidInput.value = '';
                 typeInput.value = 'PERSONAL';
 
                 renderContacts();
@@ -2621,6 +2709,51 @@
                 showToast(`TYPE UPDATED TO ${newType}`);
             } catch (error) {
                 contacts[index].type = oldType;
+                const searchInput = document.getElementById('contactSearchInput');
+                renderContacts(searchInput?.value || '');
+                showToast('UPDATE FAILED', 'error');
+            }
+        }
+
+        async function editContactLid(index) {
+            if (index < 0 || index >= contacts.length) return;
+
+            const contact = contacts[index];
+            const currentLid = contact.lid || '';
+            const newLid = prompt(
+                `Enter WhatsApp Linked ID (LID) for ${contact.name}:\n\nYou can find this in the SOURCE field of filtered messages (e.g., 21992393462594@lid).\nJust enter the numbers, or paste the full format - @lid will be removed automatically.\n\nLeave empty to remove LID.`,
+                currentLid
+            );
+
+            if (newLid === null) return; // User cancelled
+
+            // Clean up the LID - remove @lid suffix and non-digits
+            let cleanLid = newLid.trim().replace('@lid', '').replace(/\D/g, '');
+
+            // Validate
+            if (cleanLid && !validateLid(cleanLid)) {
+                showToast('INVALID LID FORMAT (10-25 DIGITS)', 'error');
+                return;
+            }
+
+            const oldLid = contact.lid;
+            if (cleanLid) {
+                contact.lid = cleanLid;
+            } else {
+                delete contact.lid;
+            }
+
+            try {
+                await saveContacts();
+                const searchInput = document.getElementById('contactSearchInput');
+                renderContacts(searchInput?.value || '');
+                showToast(cleanLid ? 'LID UPDATED' : 'LID REMOVED');
+            } catch (error) {
+                if (oldLid) {
+                    contact.lid = oldLid;
+                } else {
+                    delete contact.lid;
+                }
                 const searchInput = document.getElementById('contactSearchInput');
                 renderContacts(searchInput?.value || '');
                 showToast('UPDATE FAILED', 'error');

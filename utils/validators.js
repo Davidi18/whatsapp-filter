@@ -109,25 +109,37 @@ function normalizeGroupId(groupId) {
  */
 function parseRemoteJid(remoteJid) {
   if (!remoteJid) {
-    return { sourceId: '', sourceType: 'unknown', isStatusBroadcast: false };
+    return { sourceId: '', sourceType: 'unknown', isStatusBroadcast: false, isLid: false };
   }
 
   if (remoteJid.includes('status@broadcast')) {
-    return { sourceId: '', sourceType: 'status', isStatusBroadcast: true };
+    return { sourceId: '', sourceType: 'status', isStatusBroadcast: true, isLid: false };
   }
 
   if (remoteJid.includes('@g.us')) {
     return {
       sourceId: remoteJid.replace('@g.us', ''),
       sourceType: 'group',
-      isStatusBroadcast: false
+      isStatusBroadcast: false,
+      isLid: false
+    };
+  }
+
+  // Handle LID (Linked ID) format - WhatsApp internal user identifier
+  if (remoteJid.includes('@lid')) {
+    return {
+      sourceId: remoteJid.replace('@lid', ''),
+      sourceType: 'contact',
+      isStatusBroadcast: false,
+      isLid: true
     };
   }
 
   return {
     sourceId: remoteJid.replace('@s.whatsapp.net', ''),
     sourceType: 'contact',
-    isStatusBroadcast: false
+    isStatusBroadcast: false,
+    isLid: false
   };
 }
 
