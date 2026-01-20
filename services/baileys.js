@@ -9,6 +9,7 @@ const {
   DisconnectReason,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
+  makeInMemoryStore,
   isJidGroup,
   isJidBroadcast
 } = require('@whiskeysockets/baileys');
@@ -20,6 +21,7 @@ const pino = require('pino');
 
 // Service state
 let socket = null;
+let store = null;
 let qrCodeData = null;
 let qrCodeBase64 = null;
 let connectionStatus = 'disconnected';
@@ -50,6 +52,9 @@ async function connect() {
     const { version } = await fetchLatestBaileysVersion();
     logger.info('Baileys connecting', { version: version.join('.') });
 
+    // Create in-memory store for contacts/chats (helps with LID resolution)
+    store = makeInMemoryStore({ logger: baileysLogger });
+
     // Create socket
     socket = makeWASocket({
       version,
@@ -61,8 +66,19 @@ async function connect() {
       },
       generateHighQualityLinkPreview: false,
       syncFullHistory: false,
-      markOnlineOnConnect: true
+      markOnlineOnConnect: true,
+      getMessage: async (key) => {
+        // Required for store to work properly
+        if (store) {
+          const msg = await store.loadMessage(key.remoteJid, key.id);
+          return msg?.message || undefined;
+        }
+        return undefined;
+      }
     });
+
+    // Bind store to socket events
+    store.bind(socket.ev);
 
     // Handle connection updates
     socket.ev.on('connection.update', async (update) => {
@@ -191,13 +207,38 @@ async function handleIncomingMessage(msg) {
   if (!onMessageCallback) return;
 
   try {
-    const remoteJid = msg.key.remoteJid;
+    let remoteJid = msg.key.remoteJid;
     const isGroup = isJidGroup(remoteJid);
     const fromMe = msg.key.fromMe || false;
 
     // Extract message content
     const messageContent = msg.message;
     if (!messageContent) return;
+
+    // Handle LID format - try to resolve to phone number
+    if (remoteJid.includes('@lid') && socket) {
+      // Try to get phone number from Baileys store/contacts
+      const lidId = remoteJid.replace('@lid', '');
+
+      // Check if socket has contact info with phone number
+      try {
+        // Method 1: Check if there's a phone number in the signal store
+        const phoneJid = await resolvePhoneFromLid(lidId);
+        if (phoneJid) {
+          logger.debug('Resolved LID to phone', { lid: lidId, phone: phoneJid });
+          remoteJid = phoneJid;
+        } else {
+          logger.debug('Could not resolve LID to phone', {
+            lid: lidId,
+            msgKeys: Object.keys(msg),
+            keyKeys: Object.keys(msg.key),
+            hasVerifiedBizName: !!msg.verifiedBizName
+          });
+        }
+      } catch (resolveErr) {
+        logger.debug('LID resolution failed', { error: resolveErr.message });
+      }
+    }
 
     // Build Evolution API compatible payload
     const evolutionPayload = {
@@ -222,6 +263,49 @@ async function handleIncomingMessage(msg) {
     await onMessageCallback(evolutionPayload);
   } catch (error) {
     logger.error('Failed to process incoming message', { error: error.message });
+  }
+}
+
+/**
+ * Try to resolve LID to phone number using Baileys store
+ */
+async function resolvePhoneFromLid(lidId) {
+  if (!socket) return null;
+
+  try {
+    // Method 1: Try Baileys v7 signalRepository lidMapping
+    if (socket.signalRepository?.lidMapping) {
+      const mapping = socket.signalRepository.lidMapping;
+      if (typeof mapping.getPNForLID === 'function') {
+        const pn = await mapping.getPNForLID(lidId);
+        if (pn) return `${pn}@s.whatsapp.net`;
+      }
+    }
+
+    // Method 2: Try using our in-memory store contacts
+    if (store?.contacts) {
+      for (const [jid, contact] of Object.entries(store.contacts)) {
+        // Check if contact has lid field matching our lidId
+        if (contact.lid === lidId || contact.lid === `${lidId}@lid`) {
+          if (contact.phoneNumber) {
+            return `${contact.phoneNumber}@s.whatsapp.net`;
+          }
+          if (jid.includes('@s.whatsapp.net')) {
+            return jid;
+          }
+        }
+      }
+    }
+
+    // Method 3: Check authState for self
+    if (socket.authState?.creds?.me?.lid === lidId) {
+      return socket.authState.creds.me.id;
+    }
+
+    return null;
+  } catch (error) {
+    logger.debug('resolvePhoneFromLid error', { error: error.message });
+    return null;
   }
 }
 
