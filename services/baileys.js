@@ -224,34 +224,29 @@ async function handleIncomingMessage(msg) {
     const messageContent = msg.message;
     if (!messageContent) return;
 
-    // Handle LID format - log full message structure to understand what Baileys receives
+    // Handle LID format - extract phone number from senderPn field
     if (remoteJid.includes('@lid')) {
-      logger.info('LID message received - full structure:', {
-        remoteJid,
-        keyFields: msg.key,
-        pushName: msg.pushName,
-        verifiedBizName: msg.verifiedBizName,
-        participant: msg.participant,
-        // Check for phone number in various possible locations
-        msgTopLevelKeys: Object.keys(msg),
-        messageKeys: msg.message ? Object.keys(msg.message) : [],
-        // Check if there's a senderKeyDistributionMessage with sender info
-        senderKeyDist: msg.message?.senderKeyDistributionMessage,
-        // Check message context
-        contextInfo: msg.message?.extendedTextMessage?.contextInfo ||
-                     msg.message?.conversation?.contextInfo
-      });
-
-      // Try to resolve LID to phone number
-      const lidId = remoteJid.replace('@lid', '');
-      try {
-        const phoneJid = await resolvePhoneFromLid(lidId);
-        if (phoneJid) {
-          logger.info('Resolved LID to phone', { lid: lidId, phone: phoneJid });
-          remoteJid = phoneJid;
+      // Baileys provides the actual phone number in msg.key.senderPn
+      if (msg.key.senderPn) {
+        logger.info('LID resolved via senderPn', {
+          lid: remoteJid,
+          phone: msg.key.senderPn
+        });
+        remoteJid = msg.key.senderPn;
+      } else {
+        // Fallback: try other resolution methods
+        const lidId = remoteJid.replace('@lid', '');
+        try {
+          const phoneJid = await resolvePhoneFromLid(lidId);
+          if (phoneJid) {
+            logger.info('LID resolved via store', { lid: lidId, phone: phoneJid });
+            remoteJid = phoneJid;
+          } else {
+            logger.warn('Could not resolve LID to phone', { lid: remoteJid, pushName: msg.pushName });
+          }
+        } catch (resolveErr) {
+          logger.debug('LID resolution failed', { error: resolveErr.message });
         }
-      } catch (resolveErr) {
-        logger.debug('LID resolution failed', { error: resolveErr.message });
       }
     }
 
