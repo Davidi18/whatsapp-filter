@@ -52,8 +52,16 @@ async function connect() {
     const { version } = await fetchLatestBaileysVersion();
     logger.info('Baileys connecting', { version: version.join('.') });
 
-    // Create in-memory store for contacts/chats (helps with LID resolution)
-    store = makeInMemoryStore({ logger: baileysLogger });
+    // Try to create in-memory store (optional - for LID resolution)
+    try {
+      if (typeof makeInMemoryStore === 'function') {
+        store = makeInMemoryStore({ logger: baileysLogger });
+        logger.info('In-memory store created');
+      }
+    } catch (storeErr) {
+      logger.warn('Could not create in-memory store', { error: storeErr.message });
+      store = null;
+    }
 
     // Create socket
     socket = makeWASocket({
@@ -68,7 +76,6 @@ async function connect() {
       syncFullHistory: false,
       markOnlineOnConnect: true,
       getMessage: async (key) => {
-        // Required for store to work properly
         if (store) {
           const msg = await store.loadMessage(key.remoteJid, key.id);
           return msg?.message || undefined;
@@ -77,8 +84,10 @@ async function connect() {
       }
     });
 
-    // Bind store to socket events
-    store.bind(socket.ev);
+    // Bind store to socket events (if store exists)
+    if (store) {
+      store.bind(socket.ev);
+    }
 
     // Handle connection updates
     socket.ev.on('connection.update', async (update) => {
