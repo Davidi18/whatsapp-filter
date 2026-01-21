@@ -216,6 +216,17 @@ async function handleIncomingMessage(msg) {
   if (!onMessageCallback) return;
 
   try {
+    // DEBUG: Log the full message structure to understand Baileys format
+    logger.info('RAW Baileys message received', {
+      'msg.key': msg.key,
+      'msg.pushName': msg.pushName,
+      'msg.senderPn': msg.senderPn,
+      'msg.verifiedBizName': msg.verifiedBizName,
+      'msg.messageTimestamp': msg.messageTimestamp,
+      // Log all top-level keys
+      'msgKeys': Object.keys(msg)
+    });
+
     let remoteJid = msg.key.remoteJid;
     const isGroup = isJidGroup(remoteJid);
     const fromMe = msg.key.fromMe || false;
