@@ -24,8 +24,11 @@ function setConfig(cfg) {
  * Check if source is allowed
  * Returns: { isAllowed, sourceId, sourceType, entityType, reason }
  * entityType is the type of the contact/group (VIP, BUSINESS, etc.)
+ *
+ * @param {string} remoteJid - The remote JID
+ * @param {string|null} senderPn - Optional sender phone number (from Baileys LID resolution)
  */
-function checkAllowed(remoteJid) {
+function checkAllowed(remoteJid, senderPn = null) {
   const { sourceId, sourceType, isStatusBroadcast } = parseRemoteJid(remoteJid);
 
   if (isStatusBroadcast) {
@@ -63,7 +66,21 @@ function checkAllowed(remoteJid) {
   }
 
   // Personal message - normalize both sides for comparison
-  const normalizedSourceId = normalizePhone(sourceId);
+  let normalizedSourceId = normalizePhone(sourceId);
+
+  // If sourceId looks like a LID and we have senderPn, use senderPn instead
+  if ((sourceId.includes('lid') || !normalizedSourceId.match(/^\d{10,15}$/)) && senderPn) {
+    const normalizedSenderPn = normalizePhone(senderPn);
+    if (normalizedSenderPn.match(/^\d{10,15}$/)) {
+      logger.debug('Using senderPn for phone matching', {
+        originalSourceId: sourceId,
+        senderPn,
+        normalizedSenderPn
+      });
+      normalizedSourceId = normalizedSenderPn;
+    }
+  }
+
   const matchedContact = config?.allowedNumbers?.find(c =>
     normalizePhone(c.phone) === normalizedSourceId
   );
@@ -74,6 +91,7 @@ function checkAllowed(remoteJid) {
     logger.debug('Phone match failed', {
       incoming: sourceId,
       normalized: normalizedSourceId,
+      senderPn: senderPn || 'none',
       configuredSample: config.allowedNumbers.slice(0, 3).map(c => ({
         original: c.phone,
         normalized: normalizePhone(c.phone)
@@ -83,7 +101,7 @@ function checkAllowed(remoteJid) {
 
   return {
     isAllowed,
-    sourceId,
+    sourceId: normalizedSourceId, // Return the resolved phone number
     sourceType,
     entityType: matchedContact?.type || null,
     entityName: matchedContact?.name || null,
@@ -180,7 +198,9 @@ async function handleUpsert(payload, context) {
   // Extract sender info - Evolution API wraps data in 'data' field
   const data = payload.data || payload;
   const remoteJid = data.key?.remoteJid || '';
-  const { isAllowed, sourceId, sourceType, entityType, entityName, reason } = checkAllowed(remoteJid);
+  // Get senderPn from Baileys payload (used for LID resolution fallback)
+  const senderPn = data.senderPn || data.key?.senderPn || null;
+  const { isAllowed, sourceId, sourceType, entityType, entityName, reason } = checkAllowed(remoteJid, senderPn);
 
   // Extract sender name (pushName) from Evolution API payload, fallback to entity name from config
   const senderName = data.pushName || entityName || '';
@@ -368,10 +388,11 @@ async function handleSend(payload, context) {
   // Extract and store outgoing message
   const data = payload.data || payload;
   const remoteJid = data.key?.remoteJid || '';
-  const { sourceId, sourceType } = parseRemoteJid(remoteJid);
+  // Get senderPn from Baileys payload (used for LID resolution fallback)
+  const senderPn = data.senderPn || data.key?.senderPn || null;
 
   // Check if recipient is in allowed list (only store messages to allowed contacts)
-  const { isAllowed } = checkAllowed(remoteJid);
+  const { isAllowed, sourceId, sourceType } = checkAllowed(remoteJid, senderPn);
 
   // Skip if recipient is not in allowed list
   if (!isAllowed) {

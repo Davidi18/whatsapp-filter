@@ -224,28 +224,86 @@ async function handleIncomingMessage(msg) {
     const messageContent = msg.message;
     if (!messageContent) return;
 
-    // Handle LID format - extract phone number from senderPn field
+    // For group messages, get the actual sender (participant)
+    // For private messages, remoteJid is the sender (or recipient if fromMe)
+    let senderPhone = null;
+
+    // Handle LID format - extract phone number from various sources
     if (remoteJid.includes('@lid')) {
-      // Baileys provides the actual phone number in msg.key.senderPn
+      // Try multiple sources for phone number resolution
+
+      // Source 1: msg.key.senderPn (available in group messages)
       if (msg.key.senderPn) {
-        logger.info('LID resolved via senderPn', {
+        senderPhone = msg.key.senderPn;
+        logger.info('LID resolved via key.senderPn', {
           lid: remoteJid,
-          phone: msg.key.senderPn
+          phone: senderPhone
         });
-        remoteJid = msg.key.senderPn;
-      } else {
-        // Fallback: try other resolution methods
+      }
+
+      // Source 2: msg.senderPn (sometimes at message root level)
+      if (!senderPhone && msg.senderPn) {
+        senderPhone = msg.senderPn;
+        logger.info('LID resolved via msg.senderPn', {
+          lid: remoteJid,
+          phone: senderPhone
+        });
+      }
+
+      // Source 3: Try the store for LID mapping (pass msg for pushName matching)
+      if (!senderPhone) {
         const lidId = remoteJid.replace('@lid', '');
         try {
-          const phoneJid = await resolvePhoneFromLid(lidId);
+          const phoneJid = await resolvePhoneFromLid(lidId, msg);
           if (phoneJid) {
-            logger.info('LID resolved via store', { lid: lidId, phone: phoneJid });
-            remoteJid = phoneJid;
-          } else {
-            logger.warn('Could not resolve LID to phone', { lid: remoteJid, pushName: msg.pushName });
+            senderPhone = phoneJid.replace('@s.whatsapp.net', '');
+            logger.info('LID resolved via store lookup', { lid: lidId, phone: senderPhone });
           }
         } catch (resolveErr) {
           logger.debug('LID resolution failed', { error: resolveErr.message });
+        }
+      }
+
+      // If we found a phone number, format it correctly as JID
+      if (senderPhone) {
+        // Ensure it's just the phone number (no suffix)
+        senderPhone = senderPhone.replace('@s.whatsapp.net', '').replace('@lid', '');
+        remoteJid = `${senderPhone}@s.whatsapp.net`;
+      } else {
+        logger.warn('Could not resolve LID to phone', {
+          lid: remoteJid,
+          pushName: msg.pushName,
+          hasKeySenderPn: !!msg.key.senderPn,
+          hasMsgSenderPn: !!msg.senderPn,
+          fromMe
+        });
+      }
+    }
+
+    // Handle participant LID in group messages
+    let participant = msg.key.participant;
+    if (isGroup && participant && participant.includes('@lid')) {
+      // Try to resolve participant LID to phone number
+      const participantSenderPn = msg.key.senderPn || msg.senderPn;
+      if (participantSenderPn) {
+        participant = `${participantSenderPn.replace('@s.whatsapp.net', '').replace('@lid', '')}@s.whatsapp.net`;
+        logger.info('Participant LID resolved via senderPn', {
+          originalParticipant: msg.key.participant,
+          resolved: participant
+        });
+      } else {
+        // Try store resolution
+        try {
+          const resolvedParticipant = await resolvePhoneFromLid(participant, msg);
+          if (resolvedParticipant) {
+            participant = resolvedParticipant;
+            logger.info('Participant LID resolved via store', {
+              originalParticipant: msg.key.participant,
+              resolved: participant
+            });
+          }
+        } catch (err) {
+          logger.debug('Failed to resolve participant LID', { error: err.message });
         }
       }
     }
@@ -257,12 +315,14 @@ async function handleIncomingMessage(msg) {
           remoteJid,
           fromMe,
           id: msg.key.id,
-          participant: msg.key.participant
+          participant
         },
         pushName: msg.pushName || '',
         message: messageContent,
         messageTimestamp: msg.messageTimestamp,
-        messageType: getMessageType(messageContent)
+        messageType: getMessageType(messageContent),
+        // Add senderPn to payload for downstream use
+        senderPn: msg.key.senderPn || msg.senderPn || null
       },
       event: fromMe ? 'SEND_MESSAGE' : 'MESSAGES_UPSERT',
       instance: 'baileys-direct',
@@ -277,18 +337,24 @@ async function handleIncomingMessage(msg) {
 }
 
 /**
- * Try to resolve LID to phone number using Baileys store
+ * Try to resolve LID to phone number using Baileys store and various methods
  */
-async function resolvePhoneFromLid(lidId) {
+async function resolvePhoneFromLid(lidId, msg = null) {
   if (!socket) return null;
+
+  // Clean the lid ID
+  const cleanLid = lidId.replace('@lid', '');
 
   try {
     // Method 1: Try Baileys v7 signalRepository lidMapping
     if (socket.signalRepository?.lidMapping) {
       const mapping = socket.signalRepository.lidMapping;
       if (typeof mapping.getPNForLID === 'function') {
-        const pn = await mapping.getPNForLID(lidId);
-        if (pn) return `${pn}@s.whatsapp.net`;
+        const pn = await mapping.getPNForLID(cleanLid);
+        if (pn) {
+          logger.debug('LID resolved via signalRepository', { lid: cleanLid, phone: pn });
+          return `${pn}@s.whatsapp.net`;
+        }
       }
     }
 
@@ -296,25 +362,58 @@ async function resolvePhoneFromLid(lidId) {
     if (store?.contacts) {
       for (const [jid, contact] of Object.entries(store.contacts)) {
         // Check if contact has lid field matching our lidId
-        if (contact.lid === lidId || contact.lid === `${lidId}@lid`) {
+        if (contact.lid === cleanLid || contact.lid === `${cleanLid}@lid`) {
           if (contact.phoneNumber) {
+            logger.debug('LID resolved via store contact phoneNumber', { lid: cleanLid, phone: contact.phoneNumber });
             return `${contact.phoneNumber}@s.whatsapp.net`;
           }
           if (jid.includes('@s.whatsapp.net')) {
+            logger.debug('LID resolved via store contact jid', { lid: cleanLid, jid });
+            return jid;
+          }
+        }
+        // Also check by notify/name if we have a pushName to match
+        if (msg?.pushName && contact.notify === msg.pushName && jid.includes('@s.whatsapp.net')) {
+          logger.debug('LID resolved via pushName match', { lid: cleanLid, pushName: msg.pushName, jid });
+          return jid;
+        }
+      }
+    }
+
+    // Method 3: Check authState for self (if message is from me)
+    const meLid = socket.authState?.creds?.me?.lid;
+    if (meLid && (meLid === cleanLid || meLid === `${cleanLid}@lid`)) {
+      logger.debug('LID resolved as self', { lid: cleanLid, me: socket.authState.creds.me.id });
+      return socket.authState.creds.me.id;
+    }
+
+    // Method 4: Try chat store for recent chats
+    if (store?.chats) {
+      for (const [chatJid, chat] of Object.entries(store.chats)) {
+        if (chat.lid === cleanLid || chat.lid === `${cleanLid}@lid`) {
+          if (chatJid.includes('@s.whatsapp.net')) {
+            logger.debug('LID resolved via chat store', { lid: cleanLid, jid: chatJid });
+            return chatJid;
+          }
+        }
+      }
+    }
+
+    // Method 5: Try socket.store if available (different from our store)
+    if (socket.store?.contacts) {
+      for (const [jid, contact] of Object.entries(socket.store.contacts)) {
+        if (contact.lid === cleanLid || contact.lid === `${cleanLid}@lid`) {
+          if (jid.includes('@s.whatsapp.net')) {
+            logger.debug('LID resolved via socket.store', { lid: cleanLid, jid });
             return jid;
           }
         }
       }
     }
 
-    // Method 3: Check authState for self
-    if (socket.authState?.creds?.me?.lid === lidId) {
-      return socket.authState.creds.me.id;
-    }
-
     return null;
   } catch (error) {
-    logger.debug('resolvePhoneFromLid error', { error: error.message });
+    logger.debug('resolvePhoneFromLid error', { error: error.message, lid: cleanLid });
     return null;
   }
 }
