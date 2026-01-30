@@ -94,6 +94,13 @@ function setConfig(config) {
 }
 
 /**
+ * Set connected phone number (auto-allowed)
+ */
+function setConnectedPhone(phone) {
+  messageHandler.setConnectedPhone(phone);
+}
+
+/**
  * Get list of supported events
  */
 function getSupportedEvents() {
@@ -104,6 +111,7 @@ module.exports = {
   routeEvent,
   detectEventType,
   setConfig,
+  setConnectedPhone,
   getSupportedEvents,
   EVENT_HANDLERS
 };

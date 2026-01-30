@@ -2316,7 +2316,10 @@
                             ${msgTypeIcon ? `<span class="event-msg-type-icon">${msgTypeIcon}</span>` : ''}
                             <span class="event-sender-name" title="${e.source || ''}">${escapeHtml(senderDisplay)}</span>
                             ${e.mediaId && (e.messageType === 'image' || e.messageType === 'sticker') ? `<img src="/api/media/${e.mediaId}" class="event-media-thumb" alt="media" loading="lazy" />` : ''}
-                            ${messagePreview ? `<span class="event-msg-preview">${escapeHtml(messagePreview)}</span>` : ''}
+                            ${e.mediaId && e.messageType === 'video' ? `<video src="/api/media/${e.mediaId}" class="event-media-thumb" style="object-fit:cover;" muted preload="metadata"></video>` : ''}
+                            ${e.mediaId && e.messageType === 'audio' ? `<audio src="/api/media/${e.mediaId}" controls style="height:32px; max-width:200px;" preload="none" onclick="event.stopPropagation()"></audio>` : ''}
+                            ${messagePreview && !(e.mediaId && e.messageType === 'audio') ? `<span class="event-msg-preview">${escapeHtml(messagePreview)}</span>` : ''}
+                            ${!e.mediaId && e.messageType === 'audio' ? `<span class="event-msg-preview">${escapeHtml(messagePreview)}</span>` : ''}
                         </div>
                     </div>
                 `;

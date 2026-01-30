@@ -83,6 +83,10 @@ function initialize() {
         }
       });
     } else if (update.status === 'connected') {
+      // Auto-allow the connected phone number
+      if (update.phoneNumber) {
+        eventRouter.setConnectedPhone(update.phoneNumber);
+      }
       await alertService.send({
         level: alertService.ALERT_LEVELS.INFO,
         event: 'baileys_connected',
