@@ -402,6 +402,7 @@ async function handleSend(payload, context) {
   // Skip if recipient is not in allowed list
   if (!isAllowed) {
     statsService.increment('SEND_MESSAGE', 'filtered');
+    logger.filter(sourceId, false, sourceType);
     return { action: 'filtered', reason: 'recipient_not_allowed' };
   }
 

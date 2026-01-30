@@ -362,6 +362,9 @@ async function handleIncomingMessage(msg) {
     // Download media if present
     let mediaId = null;
     const msgType = getMessageType(messageContent);
+    const mediaMsg = messageContent.imageMessage || messageContent.videoMessage ||
+      messageContent.audioMessage || messageContent.documentMessage ||
+      messageContent.stickerMessage;
     if (['image', 'video', 'audio', 'document', 'sticker'].includes(msgType)) {
       try {
         const buffer = await downloadMediaMessage(msg, 'buffer', {}, {
@@ -369,14 +372,23 @@ async function handleIncomingMessage(msg) {
           reuploadRequest: socket.updateMediaMessage
         });
         if (buffer) {
-          const mediaMsg = messageContent.imageMessage || messageContent.videoMessage ||
-            messageContent.audioMessage || messageContent.documentMessage ||
-            messageContent.stickerMessage;
           const mimeType = mediaMsg?.mimetype || 'application/octet-stream';
           mediaId = await mediaStore.saveMedia(msg.key.id, buffer, mimeType);
         }
       } catch (dlErr) {
-        logger.debug('Media download failed', { id: msg.key.id, error: dlErr.message });
+        logger.warn('Media download failed', { id: msg.key.id, type: msgType, fromMe, error: dlErr.message });
+        // Fallback: save jpegThumbnail if available (embedded preview, no download needed)
+        if (mediaMsg?.jpegThumbnail) {
+          try {
+            const thumbBuffer = Buffer.isBuffer(mediaMsg.jpegThumbnail)
+              ? mediaMsg.jpegThumbnail
+              : Buffer.from(mediaMsg.jpegThumbnail, 'base64');
+            mediaId = await mediaStore.saveMedia(msg.key.id, thumbBuffer, 'image/jpeg');
+            logger.info('Saved jpegThumbnail fallback', { id: msg.key.id, size: thumbBuffer.length });
+          } catch (thumbErr) {
+            logger.warn('Thumbnail save failed', { id: msg.key.id, error: thumbErr.message });
+          }
+        }
       }
     }
 
