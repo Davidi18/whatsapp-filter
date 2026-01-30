@@ -13,11 +13,24 @@ const { parseRemoteJid, normalizePhone, normalizeGroupId } = require('../utils/v
 // Config will be injected
 let config = null;
 
+// Connected phone number (auto-allowed)
+let connectedPhone = null;
+
 /**
  * Set config reference
  */
 function setConfig(cfg) {
   config = cfg;
+}
+
+/**
+ * Set connected phone number (auto-allowed for outgoing messages)
+ */
+function setConnectedPhone(phone) {
+  connectedPhone = phone ? normalizePhone(phone) : null;
+  if (connectedPhone) {
+    logger.info('Connected phone set (auto-allowed)', { phone: connectedPhone });
+  }
 }
 
 /**
@@ -81,10 +94,13 @@ function checkAllowed(remoteJid, senderPn = null) {
     }
   }
 
+  // Auto-allow the connected phone number
+  const isOwnPhone = connectedPhone && normalizedSourceId === connectedPhone;
+
   const matchedContact = config?.allowedNumbers?.find(c =>
     normalizePhone(c.phone) === normalizedSourceId
   );
-  const isAllowed = !!matchedContact;
+  const isAllowed = !!matchedContact || isOwnPhone;
 
   // Debug logging for phone matching
   if (!isAllowed && config?.allowedNumbers?.length > 0) {
@@ -103,8 +119,8 @@ function checkAllowed(remoteJid, senderPn = null) {
     isAllowed,
     sourceId: normalizedSourceId, // Return the resolved phone number
     sourceType,
-    entityType: matchedContact?.type || null,
-    entityName: matchedContact?.name || null,
+    entityType: matchedContact?.type || (isOwnPhone ? 'SELF' : null),
+    entityName: matchedContact?.name || (isOwnPhone ? 'Me' : null),
     reason: isAllowed ? null : 'not_in_allowed_contacts'
   };
 }
@@ -483,6 +499,7 @@ async function handleSend(payload, context) {
 
 module.exports = {
   setConfig,
+  setConnectedPhone,
   handleUpsert,
   handleUpdate,
   handleDelete,
