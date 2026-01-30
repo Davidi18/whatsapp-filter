@@ -267,7 +267,8 @@ async function handleIncomingMessage(msg) {
     if (messageContent.senderKeyDistributionMessage && !messageContent.conversation &&
         !messageContent.extendedTextMessage && !messageContent.imageMessage &&
         !messageContent.videoMessage && !messageContent.audioMessage &&
-        !messageContent.documentMessage) {
+        !messageContent.documentMessage && !messageContent.stickerMessage &&
+        !messageContent.contactMessage && !messageContent.locationMessage) {
       // senderKeyDistributionMessage alone is just a protocol message, skip it
       // But sometimes it comes alongside a real message, so only skip if no real content
       logger.debug('Skipping protocol-only message', { remoteJid, keys: Object.keys(messageContent) });
