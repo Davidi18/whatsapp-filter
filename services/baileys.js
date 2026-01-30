@@ -231,9 +231,46 @@ async function handleIncomingMessage(msg) {
     const isGroup = isJidGroup(remoteJid);
     const fromMe = msg.key.fromMe || false;
 
-    // Extract message content
-    const messageContent = msg.message;
+    if (isGroup) {
+      logger.info('Group message received', {
+        groupJid: remoteJid,
+        participant: msg.key.participant,
+        fromMe,
+        messageKeys: msg.message ? Object.keys(msg.message) : 'null'
+      });
+    }
+
+    // Extract message content - unwrap ephemeral/viewOnce wrappers
+    let messageContent = msg.message;
     if (!messageContent) return;
+
+    // Unwrap ephemeral messages (disappearing messages in groups)
+    if (messageContent.ephemeralMessage?.message) {
+      messageContent = messageContent.ephemeralMessage.message;
+    }
+    // Unwrap viewOnce messages
+    if (messageContent.viewOnceMessage?.message) {
+      messageContent = messageContent.viewOnceMessage.message;
+    }
+    // Unwrap viewOnceMessageV2
+    if (messageContent.viewOnceMessageV2?.message) {
+      messageContent = messageContent.viewOnceMessageV2.message;
+    }
+    // Unwrap documentWithCaptionMessage
+    if (messageContent.documentWithCaptionMessage?.message) {
+      messageContent = messageContent.documentWithCaptionMessage.message;
+    }
+
+    // Skip protocol messages (key distribution, etc.) - not real user messages
+    if (messageContent.senderKeyDistributionMessage && !messageContent.conversation &&
+        !messageContent.extendedTextMessage && !messageContent.imageMessage &&
+        !messageContent.videoMessage && !messageContent.audioMessage &&
+        !messageContent.documentMessage) {
+      // senderKeyDistributionMessage alone is just a protocol message, skip it
+      // But sometimes it comes alongside a real message, so only skip if no real content
+      logger.debug('Skipping protocol-only message', { remoteJid, keys: Object.keys(messageContent) });
+      return;
+    }
 
     // For group messages, get the actual sender (participant)
     // For private messages, remoteJid is the sender (or recipient if fromMe)
