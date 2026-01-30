@@ -233,6 +233,12 @@ async function handleIncomingMessage(msg) {
     const isGroup = isJidGroup(remoteJid);
     const fromMe = msg.key.fromMe || false;
 
+    // Skip messages to/from self (sync messages, delivery receipts)
+    if (fromMe && phoneNumber && remoteJid === `${phoneNumber}@s.whatsapp.net`) {
+      logger.debug('Skipping message to self', { remoteJid, id: msg.key.id });
+      return;
+    }
+
     if (isGroup) {
       logger.info('Group message received', {
         groupJid: remoteJid,
