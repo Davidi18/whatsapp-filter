@@ -17,6 +17,7 @@ const connectionService = require('./services/connection');
 const alertService = require('./services/alerts');
 const webhookService = require('./services/webhook');
 const messageStore = require('./services/messageStore');
+const mediaStore = require('./services/mediaStore');
 const baileysService = require('./services/baileys');
 
 // Handlers
@@ -1144,6 +1145,32 @@ app.delete('/api/messages/:phone', async (req, res) => {
   res.json({ success: true, deleted: count });
 });
 
+// ============ MEDIA ENDPOINTS ============
+
+// Serve media file by ID
+app.get('/api/media/:id', async (req, res) => {
+  const media = mediaStore.getMedia(req.params.id);
+  if (!media) {
+    return res.status(404).json({ error: 'Media not found' });
+  }
+
+  try {
+    res.set('Content-Type', media.mimeType);
+    res.set('Cache-Control', 'public, max-age=86400');
+    const fs = require('fs');
+    const stream = fs.createReadStream(media.filePath);
+    stream.on('error', () => res.status(404).json({ error: 'Media file missing' }));
+    stream.pipe(res);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to serve media' });
+  }
+});
+
+// Get media stats
+app.get('/api/media/stats', (req, res) => {
+  res.json(mediaStore.getStats());
+});
+
 // 404 handler
 app.use((req, res) => {
   res.status(404).json({ error: 'Not found' });
@@ -1161,6 +1188,9 @@ async function startServer() {
   // Load message store
   await messageStore.load();
   messageStore.startAutoSave();
+
+  // Initialize media store
+  await mediaStore.init();
 
   // Initialize webhook service (only if URL is configured)
   if (config.webhookUrl) {

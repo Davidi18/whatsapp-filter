@@ -92,6 +92,7 @@ function storeMessage(phone, message) {
     type: message.type || 'text',
     hasMedia: message.hasMedia || false,
     mediaType: message.mediaType || null,
+    mediaId: message.mediaId || null,
     quotedMessage: message.quotedMessage || null,
     storedAt: new Date().toISOString()
   });

@@ -701,6 +701,20 @@
             border-left: 1px solid rgba(255,255,255,0.2);
         }
 
+        .event-media-thumb {
+            width: 40px;
+            height: 40px;
+            border-radius: 6px;
+            object-fit: cover;
+            flex-shrink: 0;
+            border: 1px solid rgba(255,255,255,0.15);
+        }
+
+        .event-modal-media {
+            margin: 12px 0;
+            text-align: center;
+        }
+
         .event-msg-type-icon {
             opacity: 0.6;
             font-size: 14px;
@@ -2301,6 +2315,7 @@
                         <div class="event-card-body">
                             ${msgTypeIcon ? `<span class="event-msg-type-icon">${msgTypeIcon}</span>` : ''}
                             <span class="event-sender-name" title="${e.source || ''}">${escapeHtml(senderDisplay)}</span>
+                            ${e.mediaId && (e.messageType === 'image' || e.messageType === 'sticker') ? `<img src="/api/media/${e.mediaId}" class="event-media-thumb" alt="media" loading="lazy" />` : ''}
                             ${messagePreview ? `<span class="event-msg-preview">${escapeHtml(messagePreview)}</span>` : ''}
                         </div>
                     </div>
@@ -2383,9 +2398,14 @@
                     <span class="event-modal-value" style="color: #ff4757;">${escapeHtml(event.error)}</span>
                 </div>
                 ` : ''}
+                ${event.mediaId && ['image', 'sticker', 'video', 'audio'].includes(event.messageType) ? `
+                <div class="event-modal-media">
+                  ${event.messageType === 'video' ? `<video src="/api/media/${event.mediaId}" controls style="max-width:100%; max-height:300px; border-radius:8px;"></video>` : event.messageType === 'audio' ? `<audio src="/api/media/${event.mediaId}" controls style="width:100%;"></audio>` : `<img src="/api/media/${event.mediaId}" style="max-width:100%; max-height:400px; border-radius:8px; cursor:pointer;" onclick="window.open('/api/media/${event.mediaId}', '_blank')" />`}
+                </div>
+                ` : ''}
                 ${event.messageBody || event.messagePreview ? `
                 <div class="event-modal-message">${escapeHtml(event.messageBody || event.messagePreview)}</div>
-                ` : '<div class="event-modal-message" style="color: rgba(255,255,255,0.4); font-style: italic;">No message content</div>'}
+                ` : `${event.mediaId ? '' : '<div class="event-modal-message" style="color: rgba(255,255,255,0.4); font-style: italic;">No message content</div>'}`}
             `;
 
             modal.classList.add('active');

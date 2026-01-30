@@ -181,6 +181,7 @@ function extractMessageContent(data) {
     type,
     hasMedia,
     mediaType,
+    mediaId: data.mediaId || null,
     fromMe: key.fromMe || false,
     timestamp: data.messageTimestamp ?
       new Date(data.messageTimestamp * 1000).toISOString() :
@@ -227,6 +228,7 @@ async function handleUpsert(payload, context) {
       messagePreview,
       messageBody: messageContent.body,
       messageType: messageContent.type,
+      mediaId: messageContent.mediaId,
       reason
     });
     logger.filter(sourceId, false, sourceType);
@@ -262,7 +264,8 @@ async function handleUpsert(payload, context) {
       action: 'forwarded',
       messagePreview,
       messageBody: messageContent.body,
-      messageType: messageContent.type
+      messageType: messageContent.type,
+      mediaId: messageContent.mediaId
     });
     logger.filter(sourceId, true, sourceType);
     return { action: 'forwarded', source: sourceId, sourceType };
@@ -287,7 +290,8 @@ async function handleUpsert(payload, context) {
       action: 'forwarded',
       messagePreview,
       messageBody: messageContent.body,
-      messageType: messageContent.type
+      messageType: messageContent.type,
+      mediaId: messageContent.mediaId
     });
     logger.filter(sourceId, true, sourceType);
 
@@ -304,6 +308,7 @@ async function handleUpsert(payload, context) {
       messagePreview,
       messageBody: messageContent.body,
       messageType: messageContent.type,
+      mediaId: messageContent.mediaId,
       error: error.message
     });
 
@@ -437,7 +442,8 @@ async function handleSend(payload, context) {
         action: 'forwarded',
         messagePreview,
         messageBody: messageContent.body,
-        messageType: messageContent.type
+        messageType: messageContent.type,
+      mediaId: messageContent.mediaId
       });
       return { action: 'forwarded' };
     } catch (error) {
@@ -451,6 +457,7 @@ async function handleSend(payload, context) {
         messagePreview,
         messageBody: messageContent.body,
         messageType: messageContent.type,
+      mediaId: messageContent.mediaId,
         error: error.message
       });
       logger.error('Failed to forward outgoing message', { error: error.message });

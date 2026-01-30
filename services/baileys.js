@@ -11,12 +11,14 @@ const {
   makeCacheableSignalKeyStore,
   makeInMemoryStore,
   isJidGroup,
-  isJidBroadcast
+  isJidBroadcast,
+  downloadMediaMessage
 } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode');
 const path = require('path');
 const fs = require('fs').promises;
 const logger = require('../utils/logger');
+const mediaStore = require('./mediaStore');
 const pino = require('pino');
 
 // Service state
@@ -231,9 +233,46 @@ async function handleIncomingMessage(msg) {
     const isGroup = isJidGroup(remoteJid);
     const fromMe = msg.key.fromMe || false;
 
-    // Extract message content
-    const messageContent = msg.message;
+    if (isGroup) {
+      logger.info('Group message received', {
+        groupJid: remoteJid,
+        participant: msg.key.participant,
+        fromMe,
+        messageKeys: msg.message ? Object.keys(msg.message) : 'null'
+      });
+    }
+
+    // Extract message content - unwrap ephemeral/viewOnce wrappers
+    let messageContent = msg.message;
     if (!messageContent) return;
+
+    // Unwrap ephemeral messages (disappearing messages in groups)
+    if (messageContent.ephemeralMessage?.message) {
+      messageContent = messageContent.ephemeralMessage.message;
+    }
+    // Unwrap viewOnce messages
+    if (messageContent.viewOnceMessage?.message) {
+      messageContent = messageContent.viewOnceMessage.message;
+    }
+    // Unwrap viewOnceMessageV2
+    if (messageContent.viewOnceMessageV2?.message) {
+      messageContent = messageContent.viewOnceMessageV2.message;
+    }
+    // Unwrap documentWithCaptionMessage
+    if (messageContent.documentWithCaptionMessage?.message) {
+      messageContent = messageContent.documentWithCaptionMessage.message;
+    }
+
+    // Skip protocol messages (key distribution, etc.) - not real user messages
+    if (messageContent.senderKeyDistributionMessage && !messageContent.conversation &&
+        !messageContent.extendedTextMessage && !messageContent.imageMessage &&
+        !messageContent.videoMessage && !messageContent.audioMessage &&
+        !messageContent.documentMessage) {
+      // senderKeyDistributionMessage alone is just a protocol message, skip it
+      // But sometimes it comes alongside a real message, so only skip if no real content
+      logger.debug('Skipping protocol-only message', { remoteJid, keys: Object.keys(messageContent) });
+      return;
+    }
 
     // For group messages, get the actual sender (participant)
     // For private messages, remoteJid is the sender (or recipient if fromMe)
@@ -319,6 +358,27 @@ async function handleIncomingMessage(msg) {
       }
     }
 
+    // Download media if present
+    let mediaId = null;
+    const msgType = getMessageType(messageContent);
+    if (['image', 'video', 'audio', 'document', 'sticker'].includes(msgType)) {
+      try {
+        const buffer = await downloadMediaMessage(msg, 'buffer', {}, {
+          logger: pino({ level: 'silent' }),
+          reuploadRequest: socket.updateMediaMessage
+        });
+        if (buffer) {
+          const mediaMsg = messageContent.imageMessage || messageContent.videoMessage ||
+            messageContent.audioMessage || messageContent.documentMessage ||
+            messageContent.stickerMessage;
+          const mimeType = mediaMsg?.mimetype || 'application/octet-stream';
+          mediaId = await mediaStore.saveMedia(msg.key.id, buffer, mimeType);
+        }
+      } catch (dlErr) {
+        logger.debug('Media download failed', { id: msg.key.id, error: dlErr.message });
+      }
+    }
+
     // Build Evolution API compatible payload
     const evolutionPayload = {
       data: {
@@ -331,7 +391,8 @@ async function handleIncomingMessage(msg) {
         pushName: msg.pushName || '',
         message: messageContent,
         messageTimestamp: msg.messageTimestamp,
-        messageType: getMessageType(messageContent),
+        messageType: msgType,
+        mediaId,
         // Add senderPn to payload for downstream use
         senderPn: msg.key.senderPn || msg.senderPn || null
       },
