@@ -175,6 +175,9 @@ function extractMessageContent(data) {
   } else if (message.locationMessage) {
     body = '[Location]';
     type = 'location';
+  } else if (message.reactionMessage) {
+    body = message.reactionMessage.text || '';
+    type = 'reaction';
   }
 
   // Get quoted message if exists
