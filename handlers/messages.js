@@ -175,6 +175,9 @@ function extractMessageContent(data) {
   } else if (message.locationMessage) {
     body = '[Location]';
     type = 'location';
+  } else if (message.reactionMessage) {
+    body = message.reactionMessage.text || '';
+    type = 'reaction';
   }
 
   // Get quoted message if exists
@@ -198,6 +201,7 @@ function extractMessageContent(data) {
     hasMedia,
     mediaType,
     mediaId: data.mediaId || null,
+    thumbBase64: data.thumbBase64 || null,
     fromMe: key.fromMe || false,
     timestamp: data.messageTimestamp ?
       new Date(data.messageTimestamp * 1000).toISOString() :
@@ -245,6 +249,7 @@ async function handleUpsert(payload, context) {
       messageBody: messageContent.body,
       messageType: messageContent.type,
       mediaId: messageContent.mediaId,
+      thumbBase64: messageContent.thumbBase64,
       reason
     });
     logger.filter(sourceId, false, sourceType);
@@ -281,7 +286,8 @@ async function handleUpsert(payload, context) {
       messagePreview,
       messageBody: messageContent.body,
       messageType: messageContent.type,
-      mediaId: messageContent.mediaId
+      mediaId: messageContent.mediaId,
+      thumbBase64: messageContent.thumbBase64
     });
     logger.filter(sourceId, true, sourceType);
     return { action: 'forwarded', source: sourceId, sourceType };
@@ -307,7 +313,8 @@ async function handleUpsert(payload, context) {
       messagePreview,
       messageBody: messageContent.body,
       messageType: messageContent.type,
-      mediaId: messageContent.mediaId
+      mediaId: messageContent.mediaId,
+      thumbBase64: messageContent.thumbBase64
     });
     logger.filter(sourceId, true, sourceType);
 
@@ -325,6 +332,7 @@ async function handleUpsert(payload, context) {
       messageBody: messageContent.body,
       messageType: messageContent.type,
       mediaId: messageContent.mediaId,
+      thumbBase64: messageContent.thumbBase64,
       error: error.message
     });
 

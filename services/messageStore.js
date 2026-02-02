@@ -93,6 +93,7 @@ function storeMessage(phone, message) {
     hasMedia: message.hasMedia || false,
     mediaType: message.mediaType || null,
     mediaId: message.mediaId || null,
+    thumbBase64: message.thumbBase64 || null,
     quotedMessage: message.quotedMessage || null,
     storedAt: new Date().toISOString()
   });
