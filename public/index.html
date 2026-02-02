@@ -2315,7 +2315,9 @@
                         <div class="event-card-body">
                             ${msgTypeIcon ? `<span class="event-msg-type-icon">${msgTypeIcon}</span>` : ''}
                             <span class="event-sender-name" title="${e.source || ''}">${escapeHtml(senderDisplay)}</span>
-                            ${e.mediaId && (e.messageType === 'image' || e.messageType === 'sticker') ? `<img src="/api/media/${e.mediaId}" class="event-media-thumb" alt="media" loading="lazy" onerror="this.style.display='none'" />` : ''}
+                            ${e.mediaId && (e.messageType === 'image' || e.messageType === 'sticker') ? `<img src="/api/media/${e.mediaId}" class="event-media-thumb" alt="media" loading="lazy" onerror="this.dataset.mediaFailed='1'; this.style.display='none'; ${`if(this.nextElementSibling?.classList.contains('event-thumb-fallback')) this.nextElementSibling.style.display='block'`}" />` : ''}
+                            ${!e.mediaId && e.thumbBase64 && (e.messageType === 'image' || e.messageType === 'sticker' || e.messageType === 'video') ? `<img src="${e.thumbBase64}" class="event-media-thumb" alt="thumbnail" loading="lazy" style="opacity:0.8" />` : ''}
+                            ${e.mediaId && (e.messageType === 'image' || e.messageType === 'sticker') && e.thumbBase64 ? `<img src="${e.thumbBase64}" class="event-media-thumb event-thumb-fallback" alt="thumbnail" loading="lazy" style="display:none; opacity:0.8" />` : ''}
                             ${e.mediaId && e.messageType === 'video' ? `<video src="/api/media/${e.mediaId}" class="event-media-thumb" style="object-fit:cover;" muted preload="metadata" onerror="this.style.display='none'"></video>` : ''}
                             ${e.mediaId && e.messageType === 'audio' ? `<audio src="/api/media/${e.mediaId}" controls style="height:32px; max-width:200px;" preload="none" onclick="event.stopPropagation()" onerror="this.parentElement.querySelector('.event-msg-preview-fallback')?.style.removeProperty('display')"></audio>` : ''}
                             ${e.mediaId && e.messageType === 'audio' ? `<span class="event-msg-preview event-msg-preview-fallback" style="display:none">[Audio]</span>` : ''}
@@ -2404,7 +2406,12 @@
                 ` : ''}
                 ${event.mediaId && ['image', 'sticker', 'video', 'audio'].includes(event.messageType) ? `
                 <div class="event-modal-media">
-                  ${event.messageType === 'video' ? `<video src="/api/media/${event.mediaId}" controls style="max-width:100%; max-height:300px; border-radius:8px;" onerror="this.outerHTML='<div style=\\'color:rgba(255,255,255,0.4);font-style:italic\\'>Media unavailable</div>'"></video>` : event.messageType === 'audio' ? `<audio src="/api/media/${event.mediaId}" controls style="width:100%;" onerror="this.outerHTML='<div style=\\'color:rgba(255,255,255,0.4);font-style:italic\\'>Audio unavailable</div>'"></audio>` : `<img src="/api/media/${event.mediaId}" style="max-width:100%; max-height:400px; border-radius:8px; cursor:pointer;" onclick="window.open('/api/media/${event.mediaId}', '_blank')" onerror="this.outerHTML='<div style=\\'color:rgba(255,255,255,0.4);font-style:italic\\'>Image unavailable</div>'" />`}
+                  ${event.messageType === 'video' ? `<video src="/api/media/${event.mediaId}" controls style="max-width:100%; max-height:300px; border-radius:8px;" onerror="this.outerHTML='<div style=\\'color:rgba(255,255,255,0.4);font-style:italic\\'>Media unavailable</div>'"></video>` : event.messageType === 'audio' ? `<audio src="/api/media/${event.mediaId}" controls style="width:100%;" onerror="this.outerHTML='<div style=\\'color:rgba(255,255,255,0.4);font-style:italic\\'>Audio unavailable</div>'"></audio>` : `<img src="/api/media/${event.mediaId}" style="max-width:100%; max-height:400px; border-radius:8px; cursor:pointer;" onclick="window.open('/api/media/${event.mediaId}', '_blank')" onerror="if(this.nextElementSibling){this.nextElementSibling.style.display='block'}; this.style.display='none'" />${event.thumbBase64 ? `<img src="${event.thumbBase64}" style="max-width:100%; max-height:400px; border-radius:8px; display:none; opacity:0.8" />` : ''}`}
+                </div>
+                ` : ''}
+                ${!event.mediaId && event.thumbBase64 && ['image', 'sticker', 'video'].includes(event.messageType) ? `
+                <div class="event-modal-media">
+                  <img src="${event.thumbBase64}" style="max-width:100%; max-height:400px; border-radius:8px; opacity:0.8" />
                 </div>
                 ` : ''}
                 ${event.messageBody || event.messagePreview ? `

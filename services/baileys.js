@@ -367,11 +367,24 @@ async function handleIncomingMessage(msg) {
 
     // Download media if present
     let mediaId = null;
+    let thumbBase64 = null;
     const msgType = getMessageType(messageContent);
     const mediaMsg = messageContent.imageMessage || messageContent.videoMessage ||
       messageContent.audioMessage || messageContent.documentMessage ||
       messageContent.stickerMessage;
     if (['image', 'video', 'audio', 'document', 'sticker'].includes(msgType)) {
+      // Extract base64 thumbnail as fallback (always available inline, no download needed)
+      if (mediaMsg?.jpegThumbnail) {
+        try {
+          const thumbBuf = Buffer.isBuffer(mediaMsg.jpegThumbnail)
+            ? mediaMsg.jpegThumbnail
+            : Buffer.from(mediaMsg.jpegThumbnail, 'base64');
+          thumbBase64 = `data:image/jpeg;base64,${thumbBuf.toString('base64')}`;
+        } catch (e) {
+          // ignore thumbnail extraction error
+        }
+      }
+
       try {
         const buffer = await downloadMediaMessage(msg, 'buffer', {}, {
           logger: pino({ level: 'silent' }),
@@ -380,10 +393,13 @@ async function handleIncomingMessage(msg) {
         if (buffer) {
           const mimeType = mediaMsg?.mimetype || 'application/octet-stream';
           mediaId = await mediaStore.saveMedia(msg.key.id, buffer, mimeType);
+          logger.info('Media downloaded and saved', { id: msg.key.id, type: msgType, size: buffer.length, mediaId });
+        } else {
+          logger.warn('Media download returned empty buffer', { id: msg.key.id, type: msgType, fromMe });
         }
       } catch (dlErr) {
         logger.warn('Media download failed', { id: msg.key.id, type: msgType, fromMe, error: dlErr.message });
-        // Fallback: save jpegThumbnail if available (embedded preview, no download needed)
+        // Fallback: save jpegThumbnail as media file
         if (mediaMsg?.jpegThumbnail) {
           try {
             const thumbBuffer = Buffer.isBuffer(mediaMsg.jpegThumbnail)
@@ -412,6 +428,7 @@ async function handleIncomingMessage(msg) {
         messageTimestamp: msg.messageTimestamp,
         messageType: msgType,
         mediaId,
+        thumbBase64,
         // Add senderPn to payload for downstream use
         senderPn: msg.key.senderPn || msg.senderPn || null
       },
