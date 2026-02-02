@@ -268,13 +268,19 @@ async function handleIncomingMessage(msg) {
     if (messageContent.documentWithCaptionMessage?.message) {
       messageContent = messageContent.documentWithCaptionMessage.message;
     }
+    // Unwrap deviceSentMessage (outgoing messages sent from phone/other devices)
+    if (messageContent.deviceSentMessage?.message) {
+      logger.debug('Unwrapping deviceSentMessage', { remoteJid, fromMe, destinationJid: messageContent.deviceSentMessage.destinationJid });
+      messageContent = messageContent.deviceSentMessage.message;
+    }
 
     // Skip protocol messages (key distribution, etc.) - not real user messages
     if (messageContent.senderKeyDistributionMessage && !messageContent.conversation &&
         !messageContent.extendedTextMessage && !messageContent.imageMessage &&
         !messageContent.videoMessage && !messageContent.audioMessage &&
         !messageContent.documentMessage && !messageContent.stickerMessage &&
-        !messageContent.contactMessage && !messageContent.locationMessage) {
+        !messageContent.contactMessage && !messageContent.locationMessage &&
+        !messageContent.reactionMessage) {
       // senderKeyDistributionMessage alone is just a protocol message, skip it
       // But sometimes it comes alongside a real message, so only skip if no real content
       logger.debug('Skipping protocol-only message', { remoteJid, keys: Object.keys(messageContent) });
