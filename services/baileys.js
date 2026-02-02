@@ -415,7 +415,7 @@ async function handleIncomingMessage(msg) {
         // Add senderPn to payload for downstream use
         senderPn: msg.key.senderPn || msg.senderPn || null
       },
-      event: fromMe ? 'SEND_MESSAGE' : 'MESSAGES_UPSERT',
+      event: 'MESSAGES_UPSERT',
       instance: 'baileys-direct',
       source: 'baileys'
     };
