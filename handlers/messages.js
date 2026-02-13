@@ -271,6 +271,58 @@ async function handleUpsert(payload, context) {
     ? messageContent.body.substring(0, 50) + '...'
     : messageContent.body;
 
+  // Check for mentions (if enabled and in group chat)
+  const mentionEnabled = process.env.ENABLE_MENTION_DETECTION === 'true';
+  if (mentionEnabled && sourceType === 'group' && connectedPhone) {
+    const mention = checkMentioned(data, connectedPhone);
+    
+    if (mention.isMentioned) {
+      // Forward to mention webhook (OpenClaw)
+      const mentionForwarded = await forwardMention(
+        payload,
+        mention,
+        sourceId,
+        sourceType,
+        senderName
+      );
+      
+      // Log mention detection
+      statsService.logEvent({
+        event: 'MENTION_DETECTED',
+        source: sourceId,
+        sourceType,
+        senderName,
+        action: mentionForwarded ? 'forwarded_to_openclaw' : 'detection_only',
+        messagePreview,
+        messageBody: messageContent.body,
+        messageType: messageContent.type,
+        method: mention.method,
+        keywords: mention.keywords
+      });
+      
+      logger.info('Mention detected', { 
+        source: sourceId,
+        method: mention.method,
+        keywords: mention.keywords,
+        forwarded: mentionForwarded
+      });
+      
+      // If configured to forward mentions only to OpenClaw (not n8n), return here
+      if (process.env.MENTION_ONLY_OPENCLAW === 'true') {
+        statsService.increment('MESSAGES_UPSERT', 'forwarded');
+        return { 
+          action: 'mention_forwarded', 
+          source: sourceId, 
+          sourceType,
+          mention: true,
+          method: mention.method
+        };
+      }
+      
+      // Otherwise, continue to also forward to n8n (mention + regular flow)
+    }
+  }
+
   // Check if webhook is configured
   const webhookHealth = webhookService.getHealth();
 
@@ -505,6 +557,121 @@ async function handleSend(payload, context) {
   return { action: 'forwarded' };
 }
 
+/**
+ * Check if message mentions the connected phone number
+ * @param {Object} messageData - Message payload
+ * @param {string} connectedPhone - Connected phone number (normalized)
+ * @returns {Object} { isMentioned, method, keywords }
+ */
+function checkMentioned(messageData, connectedPhone) {
+  if (!connectedPhone) {
+    return { isMentioned: false, method: null, keywords: [] };
+  }
+
+  const message = messageData.message || {};
+  const messageContent = extractMessageContent(messageData);
+  const body = messageContent.body.toLowerCase();
+  
+  // 1. Check for @mention in contextInfo
+  const mentioned = message.extendedTextMessage?.contextInfo?.mentionedJid || [];
+  const isMentionedByTag = mentioned.some(jid => {
+    const phone = jid.replace(/@.*$/, ''); // Extract phone from jid
+    return phone === connectedPhone || phone.endsWith(connectedPhone);
+  });
+  
+  if (isMentionedByTag) {
+    return { isMentioned: true, method: '@mention', keywords: [] };
+  }
+  
+  // 2. Check for text keywords (configurable via env)
+  const keywordsEnv = process.env.MENTION_KEYWORDS || 'דוד,david';
+  const keywords = keywordsEnv.split(',').map(k => k.trim().toLowerCase()).filter(k => k);
+  const matchedKeywords = keywords.filter(kw => body.includes(kw));
+  
+  if (matchedKeywords.length > 0) {
+    return { isMentioned: true, method: 'keyword', keywords: matchedKeywords };
+  }
+  
+  // 3. Check if it's a reply to our message
+  const quotedMsgKey = message.extendedTextMessage?.contextInfo?.stanzaId;
+  if (quotedMsgKey) {
+    const isReplyToUs = messageStore.isOurMessage(quotedMsgKey);
+    if (isReplyToUs) {
+      return { isMentioned: true, method: 'reply', keywords: [] };
+    }
+  }
+  
+  return { isMentioned: false, method: null, keywords: [] };
+}
+
+/**
+ * Forward mention to OpenClaw webhook
+ * @param {Object} payload - Original message payload
+ * @param {Object} mention - Mention detection result
+ * @param {string} sourceId - Source phone/group
+ * @param {string} sourceType - 'personal' or 'group'
+ * @param {string} senderName - Sender name
+ */
+async function forwardMention(payload, mention, sourceId, sourceType, senderName) {
+  const mentionWebhookUrl = process.env.MENTION_WEBHOOK_URL;
+  const mentionApiKey = process.env.MENTION_API_KEY;
+  
+  if (!mentionWebhookUrl) {
+    logger.debug('Mention detected but MENTION_WEBHOOK_URL not configured', { mention });
+    return false;
+  }
+  
+  // Build mention payload
+  const mentionPayload = {
+    ...payload,
+    _mention: {
+      detected: true,
+      method: mention.method,
+      keywords: mention.keywords,
+      timestamp: new Date().toISOString(),
+      source: {
+        id: sourceId,
+        type: sourceType,
+        name: senderName
+      }
+    }
+  };
+  
+  // Forward to mention webhook
+  try {
+    const headers = {
+      'Content-Type': 'application/json'
+    };
+    
+    if (mentionApiKey) {
+      headers['Authorization'] = `Bearer ${mentionApiKey}`;
+    }
+    
+    const response = await fetch(mentionWebhookUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(mentionPayload)
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Mention webhook returned ${response.status}`);
+    }
+    
+    logger.info('Mention forwarded to OpenClaw', { 
+      method: mention.method, 
+      keywords: mention.keywords,
+      source: sourceId
+    });
+    
+    statsService.increment('MENTIONS', 'forwarded');
+    return true;
+  } catch (error) {
+    logger.error('Failed to forward mention', { error: error.message });
+    statsService.increment('MENTIONS', 'failed');
+    return false;
+  }
+}
+
 module.exports = {
   setConfig,
   setConnectedPhone,
@@ -512,5 +679,7 @@ module.exports = {
   handleUpdate,
   handleDelete,
   handleSet,
-  handleSend
+  handleSend,
+  checkMentioned,
+  forwardMention
 };

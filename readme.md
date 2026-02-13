@@ -20,6 +20,7 @@ A powerful Node.js application that filters WhatsApp messages from Evolution API
 - 📱 **Responsive**: Works perfectly on mobile
 - 🔗 **RESTful API**: Full programmatic control
 - 📚 **Self-documenting**: Built-in API docs
+- 🤖 **Mention Detection**: Auto-detect @mentions & keywords → forward to OpenClaw for AI responses ([docs](MENTION_DETECTION.md))
 
 ## 🎯 How It Works
 
