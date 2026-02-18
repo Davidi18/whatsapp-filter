@@ -151,6 +151,8 @@ async function forwardToSecondary(payload, metadata) {
 
 /**
  * Forward message/event to webhook (with type-based routing)
+ * Retries up to 3 times with exponential backoff (1s, 2s, 4s delays)
+ * to handle transient failures like server restart during reconnect bursts.
  */
 async function forward(payload, metadata = {}) {
   const {
@@ -170,69 +172,73 @@ async function forward(payload, metadata = {}) {
   // Forward to secondary webhook (non-blocking)
   forwardToSecondary(payload, metadata).catch(() => {});
 
-  try {
-    await axios.post(targetUrl, payload, {
-      timeout: 5000,
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Filter-Source': 'whatsapp-filter',
-        'X-Source-Id': sourceId,
-        'X-Source-Type': sourceType,
-        'X-Entity-Type': entityType,
-        'X-Event-Type': event
-      }
-    });
+  const MAX_RETRIES = 3;
+  const headers = {
+    'Content-Type': 'application/json',
+    'X-Filter-Source': 'whatsapp-filter',
+    'X-Source-Id': sourceId,
+    'X-Source-Type': sourceType,
+    'X-Entity-Type': entityType,
+    'X-Event-Type': event
+  };
 
-    lastSuccess = new Date().toISOString();
-    consecutiveFailures = 0;
-    lastError = null;
+  let lastAttemptError = null;
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const timeout = attempt === 1 ? 5000 : 10000;
+      await axios.post(targetUrl, payload, { timeout, headers });
 
-    // Track type-specific stats
-    if (entityType) {
-      if (!typeStats[entityType]) {
-        typeStats[entityType] = { successes: 0, failures: 0, lastSuccess: null };
+      lastSuccess = new Date().toISOString();
+      consecutiveFailures = 0;
+      lastError = null;
+
+      if (entityType) {
+        if (!typeStats[entityType]) typeStats[entityType] = { successes: 0, failures: 0, lastSuccess: null };
+        typeStats[entityType].successes++;
+        typeStats[entityType].lastSuccess = lastSuccess;
       }
-      typeStats[entityType].successes++;
-      typeStats[entityType].lastSuccess = lastSuccess;
+
+      if (attempt > 1) {
+        logger.info('Message forwarded to webhook after retry', { sourceId, sourceType, entityType, event, attempt });
+      } else {
+        logger.debug('Message forwarded to webhook', { sourceId, sourceType, entityType, event });
+      }
+
+      return { success: true, usedUrl: targetUrl, attempt };
+    } catch (error) {
+      lastAttemptError = error;
+      const status = error.response?.status;
+      const isRetryable = !status || status >= 500;
+
+      if (attempt < MAX_RETRIES && isRetryable) {
+        const delay = Math.pow(2, attempt - 1) * 1000;
+        logger.warn('Webhook forward failed, retrying', {
+          sourceId, event, attempt, nextAttempt: attempt + 1, retryDelay: delay, error: error.message
+        });
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
     }
-
-    logger.debug('Message forwarded to webhook', {
-      sourceId,
-      sourceType,
-      entityType,
-      event,
-      usedTypeWebhook: entityType && typeWebhooks[entityType] ? true : false
-    });
-
-    return { success: true, usedUrl: targetUrl };
-  } catch (error) {
-    consecutiveFailures++;
-    lastError = {
-      message: error.message,
-      timestamp: new Date().toISOString(),
-      code: error.code || error.response?.status
-    };
-
-    // Track type-specific failures
-    if (entityType) {
-      if (!typeStats[entityType]) {
-        typeStats[entityType] = { successes: 0, failures: 0, lastError: null };
-      }
-      typeStats[entityType].failures++;
-      typeStats[entityType].lastError = lastError;
-    }
-
-    logger.error('Failed to forward message', {
-      sourceId,
-      sourceType,
-      entityType,
-      event,
-      error: error.message,
-      consecutiveFailures
-    });
-
-    throw error;
   }
+
+  consecutiveFailures++;
+  lastError = {
+    message: lastAttemptError.message,
+    timestamp: new Date().toISOString(),
+    code: lastAttemptError.code || lastAttemptError.response?.status
+  };
+
+  if (entityType) {
+    if (!typeStats[entityType]) typeStats[entityType] = { successes: 0, failures: 0, lastError: null };
+    typeStats[entityType].failures++;
+    typeStats[entityType].lastError = lastError;
+  }
+
+  logger.error('Failed to forward message after all retries', {
+    sourceId, sourceType, entityType, event,
+    error: lastAttemptError.message, consecutiveFailures, maxRetries: MAX_RETRIES
+  });
+
+  throw lastAttemptError;
 }
 
 /**
