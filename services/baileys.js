@@ -128,26 +128,46 @@ async function connect() {
         qrCodeData = null;
         qrCodeBase64 = null;
 
-        // Check if we should reconnect
-        const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-
-        if (shouldReconnect && retryCount < MAX_RETRIES) {
-          retryCount++;
-          const delay = Math.min(1000 * Math.pow(2, retryCount), 30000);
-          logger.info('Reconnecting...', { attempt: retryCount, delay });
-
-          setTimeout(() => connect(), delay);
-        } else if (statusCode === DisconnectReason.loggedOut) {
+        // loggedOut (401) = user removed device from phone → need QR rescan
+        if (statusCode === DisconnectReason.loggedOut) {
           logger.info('Logged out, clearing auth state');
           await clearAuthState();
           retryCount = 0;
+          if (onConnectionChangeCallback) {
+            onConnectionChangeCallback({ status: 'disconnected', reason, willReconnect: false });
+          }
+          return;
+        }
+
+        // badSession (500) = server-side session key refresh (normal, ~every 50min)
+        // restartRequired (515) = WhatsApp wants a clean reconnect
+        // For these: clear socket state but KEEP auth creds, reconnect immediately
+        if (statusCode === DisconnectReason.badSession || statusCode === DisconnectReason.restartRequired) {
+          logger.info('Session refresh, reconnecting immediately (keeping auth)', { reason });
+          retryCount = 0; // don't burn retries on normal session refreshes
+          setTimeout(() => connect(), 1000);
+          if (onConnectionChangeCallback) {
+            onConnectionChangeCallback({ status: 'disconnected', reason, willReconnect: true });
+          }
+          return;
+        }
+
+        // All other reasons: reconnect with backoff, up to MAX_RETRIES
+        const shouldReconnect = true;
+        if (retryCount < MAX_RETRIES) {
+          retryCount++;
+          const delay = Math.min(1000 * Math.pow(2, retryCount - 1), 30000); // 1s, 2s, 4s, 8s, 16s
+          logger.info('Reconnecting...', { attempt: retryCount, delay });
+          setTimeout(() => connect(), delay);
+        } else {
+          logger.error('Max retries reached, giving up', { maxRetries: MAX_RETRIES });
         }
 
         if (onConnectionChangeCallback) {
           onConnectionChangeCallback({
             status: 'disconnected',
             reason,
-            willReconnect: shouldReconnect && retryCount < MAX_RETRIES
+            willReconnect: retryCount < MAX_RETRIES
           });
         }
       } else if (connection === 'open') {
