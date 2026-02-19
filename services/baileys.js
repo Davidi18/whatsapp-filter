@@ -128,13 +128,27 @@ async function connect() {
         qrCodeData = null;
         qrCodeBase64 = null;
 
-        // loggedOut (401) = user removed device from phone → need QR rescan
+        // loggedOut (401) = either user removed device OR stale session after restart
+        // Strategy: on first loggedOut, try reconnecting once (handles restart race condition)
+        // Only clear auth + request QR if we get loggedOut twice in a row
         if (statusCode === DisconnectReason.loggedOut) {
-          logger.info('Logged out, clearing auth state');
-          await clearAuthState();
-          retryCount = 0;
-          if (onConnectionChangeCallback) {
-            onConnectionChangeCallback({ status: 'disconnected', reason, willReconnect: false });
+          if (retryCount === 0) {
+            // First loggedOut - might be a stale-session false alarm after restart
+            // Try reconnecting once before giving up
+            retryCount++;
+            logger.info('Logged out (attempt 1), retrying once before clearing auth', { retryCount });
+            setTimeout(() => connect(), 2000);
+            if (onConnectionChangeCallback) {
+              onConnectionChangeCallback({ status: 'disconnected', reason, willReconnect: true });
+            }
+          } else {
+            // Second loggedOut in a row - user genuinely removed device, clear auth
+            logger.info('Logged out (confirmed), clearing auth state');
+            await clearAuthState();
+            retryCount = 0;
+            if (onConnectionChangeCallback) {
+              onConnectionChangeCallback({ status: 'disconnected', reason, willReconnect: false });
+            }
           }
           return;
         }
