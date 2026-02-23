@@ -535,12 +535,34 @@ curl -X POST https://your-domain.com/api/test-webhook \
 5. Verify n8n webhook accepts POST
 6. Check logs for `reason: 'no_webhook_for_type'`
 
-#### Messages Marked as "Forwarded" but Not Arriving
-**This was the original bug** - fixed in commit `33416f5`:
-- Old behavior: Messages marked "forwarded" even without webhook
-- New behavior: Checks if webhook exists for specific entity type
-- Solution: Configure webhooks for all your contact/group types
-- Check: Use coverage analysis endpoint to find missing webhooks
+#### Messages Not Being Sent (allowed_no_webhook status)
+**Critical Fix** - commits `33416f5` and `b0e4fe8`:
+
+If you see `action: 'allowed_no_webhook'` in logs, your messages are **not being forwarded**!
+
+**Cause:**
+- No default webhook configured (`WEBHOOK_URL` env var not set)
+- AND no type-specific webhook for this contact/group type
+
+**Solution:**
+1. **Set default webhook**: `export WEBHOOK_URL=https://n8n.example.com/webhook`
+2. **OR configure type-specific webhooks** via API or UI
+3. **Check coverage**: `GET /api/webhooks/types` to see what's missing
+
+**How to identify:**
+```bash
+# Check logs for this warning
+grep "allowed_no_webhook" logs/
+
+# Check webhook coverage
+curl https://your-domain.com/api/webhooks/types -u "admin:password" | jq '.coverage.missingWebhooks'
+```
+
+**Expected behavior:**
+- ✅ `action: 'forwarded'` = Message was actually sent to webhook
+- ⚠️ `action: 'allowed_no_webhook'` = Message passed filter but not sent (FIX THIS!)
+- ❌ `action: 'filtered'` = Message blocked by filter (normal)
+- ❌ `action: 'failed'` = Webhook request failed (check webhook endpoint)
 
 #### Admin Interface Not Loading
 1. Check ADMIN_USERNAME/PASSWORD
@@ -575,11 +597,24 @@ tail -f /var/log/whatsapp-filter.log
 
 ## 📝 Recent Updates
 
+### v2.1.1 (2026-02-23) - CRITICAL FIX
+**🔴 Critical Fix: Prevent Silent Message Loss**
+- **BREAKING SEMANTIC CHANGE**: Messages are NEVER marked "forwarded" without webhook
+- New status: `allowed_no_webhook` for messages that pass filter but have no webhook
+- Clear WARNING logs when webhook is missing (not silent failure)
+- Prevents data loss from misconfigured or missing webhook URLs
+
+**Message Status Semantics:**
+- `forwarded` ✅ = Actually sent to webhook
+- `allowed_no_webhook` ⚠️ = Passed filter, but no webhook configured
+- `filtered` ❌ = Blocked by filter
+- `failed` ❌ = Webhook request failed
+
 ### v2.1.0 (2026-02-23)
 **🐛 Critical Fix: Group Message Forwarding**
 - Fixed bug where group messages were marked "forwarded" but not actually sent
 - Added entity-type-specific webhook validation before forwarding
-- Improved logging with `reason: 'no_webhook_for_type'` for better debugging
+- Improved logging with `reason: 'no_webhook_configured'` for better debugging
 
 **✨ New Features**
 - Webhook coverage analysis API endpoint
