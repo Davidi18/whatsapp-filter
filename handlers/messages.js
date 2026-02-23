@@ -323,29 +323,34 @@ async function handleUpsert(payload, context) {
     }
   }
 
-  // Check if webhook is configured for this specific entity type
+  // Check if webhook is configured for this specific entity type (with fallback to default)
   const targetWebhook = webhookService.getWebhookForType(entityType);
 
-  // If no webhook configured for this entity, message is allowed but nothing to forward to
+  // CRITICAL: If no webhook at all (not even default), this is a configuration error
+  // We mark it as 'allowed' but log it clearly as no-webhook scenario
   if (!targetWebhook) {
-    statsService.increment('MESSAGES_UPSERT', 'forwarded'); // Count as success
+    statsService.increment('MESSAGES_UPSERT', 'allowed_no_webhook');
     statsService.logEvent({
       event: 'MESSAGES_UPSERT',
       source: sourceId,
       sourceType,
       entityType,
       senderName,
-      action: 'forwarded',
+      action: 'allowed_no_webhook',
       messagePreview,
       messageBody: messageContent.body,
       messageType: messageContent.type,
       mediaId: messageContent.mediaId,
       thumbBase64: messageContent.thumbBase64,
-      reason: 'no_webhook_for_type'
+      reason: 'no_webhook_configured'
     });
     logger.filter(sourceId, true, sourceType);
-    logger.debug('No webhook configured for entity type', { entityType, sourceId });
-    return { action: 'forwarded', source: sourceId, sourceType, reason: 'no_webhook_for_type' };
+    logger.warn('Message allowed but no webhook configured', {
+      entityType,
+      sourceId,
+      hint: 'Set WEBHOOK_URL env var or configure type-specific webhook'
+    });
+    return { action: 'allowed_no_webhook', source: sourceId, sourceType, reason: 'no_webhook_configured' };
   }
 
   // Forward to n8n (with type-based routing)
@@ -508,61 +513,67 @@ async function handleSend(payload, context) {
     }
   }
 
-  // Forward to webhook if configured for this entity type
+  // Forward to webhook if configured (with fallback to default)
   const targetWebhook = webhookService.getWebhookForType(entityType);
-  if (targetWebhook) {
-    try {
-      await webhookService.forward(payload, { event: 'SEND_MESSAGE', entityType });
-      statsService.increment('SEND_MESSAGE', 'forwarded');
-      statsService.logEvent({
-        event: 'SEND_MESSAGE',
-        source: sourceId,
-        sourceType,
-        entityType,
-        senderName: 'Me → ' + recipientName,
-        action: 'forwarded',
-        messagePreview,
-        messageBody: messageContent.body,
-        messageType: messageContent.type,
-        mediaId: messageContent.mediaId
-      });
-      return { action: 'forwarded' };
-    } catch (error) {
-      statsService.increment('SEND_MESSAGE', 'failed');
-      statsService.logEvent({
-        event: 'SEND_MESSAGE',
-        source: sourceId,
-        sourceType,
-        entityType,
-        senderName: 'Me → ' + recipientName,
-        action: 'failed',
-        messagePreview,
-        messageBody: messageContent.body,
-        messageType: messageContent.type,
-        mediaId: messageContent.mediaId,
-        error: error.message
-      });
-      logger.error('Failed to forward outgoing message', { error: error.message });
-      return { action: 'failed', error: error.message };
-    }
+
+  // CRITICAL: If no webhook at all, this is a configuration error
+  if (!targetWebhook) {
+    statsService.increment('SEND_MESSAGE', 'allowed_no_webhook');
+    statsService.logEvent({
+      event: 'SEND_MESSAGE',
+      source: sourceId,
+      sourceType,
+      entityType,
+      senderName: 'Me → ' + recipientName,
+      action: 'allowed_no_webhook',
+      messagePreview,
+      messageBody: messageContent.body,
+      messageType: messageContent.type,
+      reason: 'no_webhook_configured'
+    });
+    logger.warn('Outgoing message allowed but no webhook configured', {
+      entityType,
+      sourceId,
+      hint: 'Set WEBHOOK_URL env var or configure type-specific webhook'
+    });
+    return { action: 'allowed_no_webhook', reason: 'no_webhook_configured' };
   }
 
-  // No webhook configured for this entity type - just log
-  statsService.increment('SEND_MESSAGE', 'forwarded'); // Count as success (no webhook = nothing to forward to)
-  statsService.logEvent({
-    event: 'SEND_MESSAGE',
-    source: sourceId,
-    sourceType,
-    entityType,
-    senderName: 'Me → ' + recipientName,
-    action: 'forwarded',
-    messagePreview,
-    messageBody: messageContent.body,
-    messageType: messageContent.type,
-    reason: 'no_webhook_for_type'
-  });
-  logger.debug('No webhook configured for entity type (outgoing)', { entityType, sourceId });
-  return { action: 'forwarded', reason: 'no_webhook_for_type' };
+  // Webhook exists - forward the message
+  try {
+    await webhookService.forward(payload, { event: 'SEND_MESSAGE', entityType });
+    statsService.increment('SEND_MESSAGE', 'forwarded');
+    statsService.logEvent({
+      event: 'SEND_MESSAGE',
+      source: sourceId,
+      sourceType,
+      entityType,
+      senderName: 'Me → ' + recipientName,
+      action: 'forwarded',
+      messagePreview,
+      messageBody: messageContent.body,
+      messageType: messageContent.type,
+      mediaId: messageContent.mediaId
+    });
+    return { action: 'forwarded' };
+  } catch (error) {
+    statsService.increment('SEND_MESSAGE', 'failed');
+    statsService.logEvent({
+      event: 'SEND_MESSAGE',
+      source: sourceId,
+      sourceType,
+      entityType,
+      senderName: 'Me → ' + recipientName,
+      action: 'failed',
+      messagePreview,
+      messageBody: messageContent.body,
+      messageType: messageContent.type,
+      mediaId: messageContent.mediaId,
+      error: error.message
+    });
+    logger.error('Failed to forward outgoing message', { error: error.message });
+    return { action: 'failed', error: error.message };
+  }
 }
 
 /**
