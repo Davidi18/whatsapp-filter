@@ -11,7 +11,7 @@ A powerful Node.js application that filters WhatsApp messages from Evolution API
 
 ## ✨ Features
 
-- 🛡️ **Smart Filtering**: Only authorized contacts get through
+- 🛡️ **Smart Filtering**: Only authorized contacts and groups get through
 - 🎨 **Retro Terminal UI**: Beautiful 80s-style admin interface
 - 🔐 **Secure**: Basic Auth + IP whitelisting support
 - 📊 **Real-time Stats**: Monitor filtered vs allowed messages
@@ -21,20 +21,42 @@ A powerful Node.js application that filters WhatsApp messages from Evolution API
 - 🔗 **RESTful API**: Full programmatic control
 - 📚 **Self-documenting**: Built-in API docs
 - 🤖 **Mention Detection**: Auto-detect @mentions & keywords → forward to OpenClaw for AI responses ([docs](MENTION_DETECTION.md))
+- 👥 **Group Support**: Filter and route group messages with type-based webhooks
+- 🔀 **Smart Routing**: Route different contact/group types to different webhooks
+- 🔍 **Coverage Analysis**: See which types are missing webhook configurations
+- ⚡ **Auto-retry**: 3 retries with exponential backoff for webhook failures
+- 🔄 **Dual Mode**: Works with Evolution API (webhook) or Baileys (direct WhatsApp connection)
 
 ## 🎯 How It Works
 
 ```
-WhatsApp → Evolution API → Filter System → n8n/Webhook
-                              ↓
-                         Only Allowed
-                          Numbers
+WhatsApp → Evolution API/Baileys → Filter System → n8n/Webhooks
+                                         ↓
+                                 Check Authorized
+                                  Contacts/Groups
+                                         ↓
+                                 Route by Type
+                                         ↓
+                            ┌────────────┴────────────┐
+                            ↓                         ↓
+                      Default Webhook         Type-Specific Webhooks
+                      (e.g., n8n)             (VIP, BUSINESS, etc.)
 ```
 
-1. **Evolution API** sends all WhatsApp messages to the filter
-2. **Filter checks** if sender is in authorized list
-3. **If authorized** → forwards to your n8n/webhook
-4. **If not** → blocks message (with stats tracking)
+### Message Flow
+
+1. **WhatsApp** → Message arrives (personal or group)
+2. **Evolution API/Baileys** → Sends to filter system
+3. **Filter checks**:
+   - Is sender/group in allowed list?
+   - What's the entity type? (VIP, BUSINESS, GENERAL, etc.)
+   - Is there a webhook configured for this type?
+4. **Smart routing**:
+   - Type-specific webhook → Use it
+   - No type webhook → Use default webhook
+   - No webhook at all → Log with `reason: 'no_webhook_for_type'`
+5. **Auto-retry**: Failed webhooks retry 3 times with exponential backoff
+6. **Stats tracking**: All actions logged for monitoring
 
 ## 🚀 Quick Start
 
@@ -135,12 +157,22 @@ Beautiful retro terminal-style interface with:
 - 📱 **Mobile responsive** design
 - ⚡ **Live updates** every 30 seconds
 
-### Contact Types
+### Contact & Group Types
 
+#### Contact Types
 - **PERSONAL**: Friends, family
-- **BUSINESS**: Clients, partners  
-- **VIP**: Priority contacts
+- **BUSINESS**: Clients, partners
+- **VIP**: Priority contacts (can route to separate webhook)
 - **TEMP**: Temporary access
+
+#### Group Types
+- **GENERAL**: Regular groups
+- **BUSINESS**: Business/work groups
+- **VIP**: Priority groups
+- **SUPPORT**: Customer support groups
+- **TEAM**: Internal team chats
+
+Each type can have its own webhook URL for smart routing!
 
 ## 🔧 API Reference
 
@@ -171,7 +203,7 @@ curl -X POST https://your-domain.com/api/contacts/add \
   -H "Content-Type: application/json" \
   -d '{
     "phone": "972501234567",
-    "name": "John Doe", 
+    "name": "John Doe",
     "type": "BUSINESS"
   }'
 ```
@@ -189,6 +221,191 @@ curl -X PUT https://your-domain.com/api/contacts/972501234567 \
 curl -X DELETE https://your-domain.com/api/contacts/972501234567 \
   -u "admin:password"
 ```
+
+### Groups Management
+
+#### Get All Groups (with webhook status)
+```bash
+curl -X GET https://your-domain.com/api/groups \
+  -u "admin:password"
+```
+
+Response includes webhook configuration status:
+```json
+{
+  "groups": [
+    {
+      "groupId": "120363123456789012@g.us",
+      "name": "Family Group",
+      "type": "GENERAL",
+      "webhookConfigured": true,
+      "webhookUrl": "https://n8n.example.com/webhook/default"
+    }
+  ]
+}
+```
+
+#### Add Group
+```bash
+curl -X POST https://your-domain.com/api/groups/add \
+  -u "admin:password" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "groupId": "120363123456789012@g.us",
+    "name": "Team Chat",
+    "type": "TEAM"
+  }'
+```
+
+#### Update Group
+```bash
+curl -X PUT https://your-domain.com/api/groups/120363123456789012@g.us \
+  -u "admin:password" \
+  -H "Content-Type: application/json" \
+  -d '{"type": "VIP"}'
+```
+
+#### Delete Group
+```bash
+curl -X DELETE https://your-domain.com/api/groups/120363123456789012@g.us \
+  -u "admin:password"
+```
+
+### Webhook Configuration
+
+#### Set Default Webhook
+```bash
+curl -X POST https://your-domain.com/api/webhook \
+  -u "admin:password" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "webhookUrl": "https://n8n.example.com/webhook/default"
+  }'
+```
+
+#### Set Type-Specific Webhooks
+```bash
+curl -X POST https://your-domain.com/api/webhooks/types \
+  -u "admin:password" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "typeWebhooks": {
+      "VIP": "https://n8n.example.com/webhook/vip",
+      "BUSINESS": "https://n8n.example.com/webhook/business",
+      "TEAM": "https://n8n.example.com/webhook/team"
+    }
+  }'
+```
+
+#### Get Webhook Coverage Analysis
+```bash
+curl -X GET https://your-domain.com/api/webhooks/types \
+  -u "admin:password"
+```
+
+Response shows which types lack webhooks:
+```json
+{
+  "typeWebhooks": {
+    "VIP": "https://n8n.example.com/webhook/vip"
+  },
+  "defaultWebhook": "https://n8n.example.com/webhook/default",
+  "coverage": {
+    "groups": [
+      {
+        "type": "GENERAL",
+        "hasWebhook": true,
+        "count": 3
+      },
+      {
+        "type": "TEAM",
+        "hasWebhook": false,
+        "count": 2
+      }
+    ],
+    "missingWebhooks": {
+      "groups": ["TEAM"],
+      "contacts": []
+    }
+  }
+}
+```
+
+## 🔀 Type-Based Routing
+
+One of the most powerful features - route different message types to different webhooks!
+
+### Use Cases
+
+1. **VIP Priority Queue**
+   - VIP contacts → Urgent n8n workflow
+   - Regular contacts → Standard workflow
+
+2. **Business Separation**
+   - BUSINESS contacts → CRM integration
+   - PERSONAL contacts → Personal automation
+
+3. **Group Categorization**
+   - TEAM groups → Slack notifications
+   - SUPPORT groups → Ticketing system
+   - GENERAL groups → Archive workflow
+
+### How It Works
+
+```javascript
+// Incoming message from VIP contact
+{
+  "entityType": "VIP",
+  "sourceType": "personal",
+  "message": "Urgent request"
+}
+// → Routes to: https://n8n.example.com/webhook/vip
+
+// Incoming message from GENERAL group
+{
+  "entityType": "GENERAL",
+  "sourceType": "group",
+  "message": "Regular discussion"
+}
+// → Routes to: https://n8n.example.com/webhook/default
+
+// Message with no webhook configured
+{
+  "entityType": "TEMP",
+  "sourceType": "personal"
+}
+// → Logged with reason: 'no_webhook_for_type'
+```
+
+### Configuration Example
+
+```bash
+# Set default webhook for all unconfigured types
+export WEBHOOK_URL=https://n8n.example.com/webhook/default
+
+# Configure type-specific webhooks via API
+curl -X POST https://your-domain.com/api/webhooks/types \
+  -u "admin:password" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "typeWebhooks": {
+      "VIP": "https://n8n.example.com/webhook/vip",
+      "BUSINESS": "https://n8n.example.com/webhook/business",
+      "TEAM": "https://n8n.example.com/webhook/team",
+      "SUPPORT": "https://support.example.com/api/ticket"
+    }
+  }'
+```
+
+### Monitoring Coverage
+
+Check which types need webhooks:
+
+```bash
+curl https://your-domain.com/api/webhooks/types -u "admin:password"
+```
+
+Look for `missingWebhooks` in the response to identify gaps.
 
 ## 📊 System Architecture
 
@@ -233,12 +450,20 @@ curl -X DELETE https://your-domain.com/api/contacts/972501234567 \
 
 | Variable | Required | Description | Default |
 |----------|----------|-------------|---------|
-| `WEBHOOK_URL` | ✅ | Target webhook URL | - |
+| `WEBHOOK_URL` | ⚠️ | Default webhook URL (or set in UI) | - |
+| `SECONDARY_WEBHOOK_URL` | ❌ | Secondary webhook (non-blocking) | - |
 | `ADMIN_USERNAME` | ✅ | Admin interface username | - |
 | `ADMIN_PASSWORD` | ✅ | Admin interface password | - |
 | `PORT` | ❌ | Server port | `3000` |
 | `NODE_ENV` | ❌ | Environment | `production` |
 | `ALLOWED_IPS` | ❌ | IP whitelist (comma-separated) | All IPs |
+| `ENABLE_MENTION_DETECTION` | ❌ | Enable @mention detection | `false` |
+| `MENTION_WEBHOOK_URL` | ❌ | OpenClaw webhook for mentions | - |
+| `MENTION_API_KEY` | ❌ | API key for mention webhook | - |
+| `MENTION_KEYWORDS` | ❌ | Comma-separated keywords | `דוד,david` |
+| `MENTION_ONLY_OPENCLAW` | ❌ | Only forward mentions to OpenClaw | `false` |
+| `ENABLE_MESSAGE_UPDATES` | ❌ | Forward read/delivered status | `false` |
+| `BAILEYS_ENABLED` | ❌ | Use Baileys (direct WhatsApp) | `false` |
 
 ### Phone Number Format
 
@@ -300,11 +525,22 @@ curl -X POST https://your-domain.com/api/test-webhook \
 1. Check Evolution API webhook URL
 2. Verify Evolution is sending POST requests
 3. Check network connectivity
+4. If using Baileys mode, check QR code connection
 
 #### Messages Not Forwarding
-1. Test webhook endpoint directly
-2. Check WEBHOOK_URL environment variable
-3. Verify n8n webhook accepts POST
+1. **Check webhook coverage**: `GET /api/webhooks/types` to see missing webhooks
+2. **Group messages not forwarding**: Verify group type has webhook configured
+3. Test webhook endpoint directly
+4. Check WEBHOOK_URL environment variable
+5. Verify n8n webhook accepts POST
+6. Check logs for `reason: 'no_webhook_for_type'`
+
+#### Messages Marked as "Forwarded" but Not Arriving
+**This was the original bug** - fixed in commit `33416f5`:
+- Old behavior: Messages marked "forwarded" even without webhook
+- New behavior: Checks if webhook exists for specific entity type
+- Solution: Configure webhooks for all your contact/group types
+- Check: Use coverage analysis endpoint to find missing webhooks
 
 #### Admin Interface Not Loading
 1. Check ADMIN_USERNAME/PASSWORD
@@ -336,6 +572,33 @@ tail -f /var/log/whatsapp-filter.log
 3. Commit changes: `git commit -m 'Add amazing feature'`
 4. Push to branch: `git push origin feature/amazing-feature`
 5. Open Pull Request
+
+## 📝 Recent Updates
+
+### v2.1.0 (2026-02-23)
+**🐛 Critical Fix: Group Message Forwarding**
+- Fixed bug where group messages were marked "forwarded" but not actually sent
+- Added entity-type-specific webhook validation before forwarding
+- Improved logging with `reason: 'no_webhook_for_type'` for better debugging
+
+**✨ New Features**
+- Webhook coverage analysis API endpoint
+- Group webhook status in GET `/api/groups`
+- Per-type webhook routing for contacts and groups
+- Missing webhook detection and reporting
+
+**🔧 Improvements**
+- Better error messages for webhook failures
+- Enhanced API responses with webhook configuration status
+- Improved debugging with entityType in all log events
+
+### v2.0.0
+- Added Baileys support (direct WhatsApp connection)
+- Mention detection system with OpenClaw integration
+- Group message support
+- Type-based webhook routing
+- Auto-retry with exponential backoff
+- Secondary webhook support
 
 ## 📄 License
 
