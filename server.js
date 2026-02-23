@@ -694,14 +694,40 @@ app.post('/api/webhook/test', async (req, res) => {
   }
 });
 
-// Get/Set type-specific webhooks
+// Get/Set type-specific webhooks with coverage analysis
 app.get('/api/webhooks/types', (req, res) => {
   const validators = require('./utils/validators');
+
+  // Analyze which groups/contacts have webhooks
+  const groupTypes = [...new Set((config.allowedGroups || []).map(g => g.type))];
+  const contactTypes = [...new Set((config.allowedNumbers || []).map(c => c.type))];
+
+  const groupCoverage = groupTypes.map(type => ({
+    type,
+    hasWebhook: !!webhookService.getWebhookForType(type),
+    count: (config.allowedGroups || []).filter(g => g.type === type).length
+  }));
+
+  const contactCoverage = contactTypes.map(type => ({
+    type,
+    hasWebhook: !!webhookService.getWebhookForType(type),
+    count: (config.allowedNumbers || []).filter(c => c.type === type).length
+  }));
+
   res.json({
     typeWebhooks: config.typeWebhooks || {},
+    defaultWebhook: webhookService.getUrl(),
     availableTypes: {
       contact: validators.getValidContactTypes(),
       group: validators.getValidGroupTypes()
+    },
+    coverage: {
+      groups: groupCoverage,
+      contacts: contactCoverage,
+      missingWebhooks: {
+        groups: groupCoverage.filter(c => !c.hasWebhook && c.count > 0).map(c => c.type),
+        contacts: contactCoverage.filter(c => !c.hasWebhook && c.count > 0).map(c => c.type)
+      }
     }
   });
 });
@@ -948,9 +974,17 @@ app.delete('/api/contacts/:phone', async (req, res) => {
 
 // ============ GROUP ENDPOINTS ============
 
-// Get all groups
+// Get all groups with webhook status
 app.get('/api/groups', (req, res) => {
-  res.json({ groups: config.allowedGroups || [] });
+  const groupsWithWebhook = (config.allowedGroups || []).map(group => {
+    const webhookForType = webhookService.getWebhookForType(group.type);
+    return {
+      ...group,
+      webhookConfigured: !!webhookForType,
+      webhookUrl: webhookForType || null
+    };
+  });
+  res.json({ groups: groupsWithWebhook });
 });
 
 // Add group
@@ -993,7 +1027,16 @@ app.post('/api/groups/add', async (req, res) => {
     eventRouter.setConfig(config);
     await saveConfig();
 
-    res.json({ success: true, group: newGroup });
+    // Check if webhook is configured for this type
+    const webhookForType = webhookService.getWebhookForType(type);
+    const hasWebhook = !!webhookForType;
+
+    res.json({
+      success: true,
+      group: newGroup,
+      webhookConfigured: hasWebhook,
+      webhookUrl: hasWebhook ? webhookForType : null
+    });
   } catch (error) {
     logger.error('Failed to add group', { error: error.message });
     res.status(500).json({ error: 'Failed to add group' });
