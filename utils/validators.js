@@ -7,8 +7,10 @@
 // Examples: +972547554964, 972-54-755-4964, +972-54-755-4964, 0547554964
 const PHONE_REGEX = /^\+?[\d\s\-()]{10,20}$/;
 
-// Group ID validation (numeric string, typically 18 digits, with optional @g.us suffix)
-const GROUP_ID_REGEX = /^\d{10,25}(@g\.us)?$/;
+// Group ID validation:
+// New format: numeric string 10-25 digits (e.g. 120363318180175905)
+// Old format: phone-timestamp (e.g. 972545741608-1595928871)
+const GROUP_ID_REGEX = /^(\d{10,25}|\d{10,15}-\d{7,12})(@g\.us)?$/;
 
 // Default contact/group types
 const DEFAULT_CONTACT_TYPES = ['PERSONAL', 'BUSINESS', 'VIP', 'TEMP'];
