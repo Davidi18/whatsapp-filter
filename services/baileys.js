@@ -19,6 +19,7 @@ const path = require('path');
 const fs = require('fs').promises;
 const logger = require('../utils/logger');
 const mediaStore = require('./mediaStore');
+const lidStore = require('./lidStore');
 const pino = require('pino');
 
 // Service state
@@ -44,6 +45,9 @@ const baileysLogger = pino({ level: 'silent' });
  */
 async function connect() {
   try {
+    // Load persistent LID→Phone mappings
+    await lidStore.load();
+
     // Ensure auth directory exists
     await fs.mkdir(AUTH_DIR, { recursive: true });
 
@@ -237,6 +241,21 @@ async function connect() {
       }
     });
 
+    // Capture LID↔Phone mappings from contacts sync
+    socket.ev.on('contacts.upsert', (contacts) => {
+      for (const contact of contacts) {
+        if (contact.lid && contact.id?.includes('@s.whatsapp.net')) {
+          const phone = contact.id.replace('@s.whatsapp.net', '');
+          const lid = contact.lid.replace('@lid', '');
+          lidStore.save(lid, phone, contact.name || contact.notify);
+        }
+      }
+      logger.info('Contacts upsert processed for LID mapping', {
+        total: contacts.length,
+        lidMapSize: lidStore.size()
+      });
+    });
+
     return true;
   } catch (error) {
     logger.error('Failed to connect Baileys', { error: error.message });
@@ -361,11 +380,25 @@ async function handleIncomingMessage(msg) {
         }
       }
 
+      // Source 4: LID persistent mapping table
+      if (!senderPhone) {
+        const lidId = remoteJid.replace('@lid', '');
+        const mapped = lidStore.resolve(lidId);
+        if (mapped) {
+          senderPhone = mapped.phone;
+          logger.info('LID resolved via mapping table', { lid: lidId, phone: senderPhone });
+        }
+      }
+
       // If we found a phone number, format it correctly as JID
       if (senderPhone) {
         // Ensure it's just the phone number (no suffix)
         senderPhone = senderPhone.replace('@s.whatsapp.net', '').replace('@lid', '');
         remoteJid = `${senderPhone}@s.whatsapp.net`;
+
+        // Save LID→Phone mapping for future use
+        const originalLid = msg.key.remoteJid.replace('@lid', '');
+        lidStore.save(originalLid, senderPhone, msg.pushName);
       } else {
         logger.warn('Could not resolve LID to phone', {
           lid: remoteJid,
@@ -401,6 +434,19 @@ async function handleIncomingMessage(msg) {
           }
         } catch (err) {
           logger.debug('Failed to resolve participant LID', { error: err.message });
+        }
+
+        // Try persistent LID mapping table
+        if (participant.includes('@lid')) {
+          const pLid = participant.replace('@lid', '');
+          const mapped = lidStore.resolve(pLid);
+          if (mapped) {
+            participant = `${mapped.phone}@s.whatsapp.net`;
+            logger.info('Participant LID resolved via mapping table', {
+              originalParticipant: msg.key.participant,
+              resolved: participant
+            });
+          }
         }
       }
     }
