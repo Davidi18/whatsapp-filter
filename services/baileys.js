@@ -762,6 +762,24 @@ function getSocket() {
   return socket;
 }
 
+/**
+ * Request pairing code for a phone number (companion mode - no QR needed)
+ * Use this instead of QR to keep phone push notifications active
+ */
+async function requestPairingCode(phone) {
+  if (!socket) {
+    throw new Error('Socket not initialized. Call connect() first.');
+  }
+  if (connectionStatus !== 'waiting_qr') {
+    throw new Error(`Cannot request pairing code in state: ${connectionStatus}. Must be waiting_qr.`);
+  }
+  // phone must be digits only, no + or spaces
+  const cleaned = phone.replace(/\D/g, '');
+  const code = await socket.requestPairingCode(cleaned);
+  logger.info('Pairing code generated', { phone: cleaned });
+  return code;
+}
+
 module.exports = {
   connect,
   disconnect,
@@ -769,6 +787,7 @@ module.exports = {
   sendMedia,
   getStatus,
   getQRCode,
+  requestPairingCode,
   onMessage,
   onConnectionChange,
   isEnabled,

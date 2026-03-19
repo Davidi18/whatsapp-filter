@@ -593,6 +593,23 @@ app.post('/api/baileys/disconnect', async (req, res) => {
   }
 });
 
+// Request pairing code (companion mode - keeps phone notifications active)
+app.post('/api/baileys/pairing-code', async (req, res) => {
+  if (!BAILEYS_ENABLED) {
+    return res.status(400).json({ error: 'Baileys mode is not enabled' });
+  }
+  const { phone } = req.body;
+  if (!phone) {
+    return res.status(400).json({ error: 'Missing required field: phone (digits only, e.g. 972547554964)' });
+  }
+  try {
+    const code = await baileysService.requestPairingCode(phone);
+    res.json({ success: true, code, instructions: `Open WhatsApp > Settings > Linked Devices > Link a Device > Link with phone number, enter code: ${code}` });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Logout and clear session
 app.post('/api/baileys/logout', async (req, res) => {
   try {
