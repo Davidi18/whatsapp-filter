@@ -673,6 +673,24 @@ async function sendMedia(to, media, caption = '') {
 }
 
 /**
+ * Fetch all groups the connected account participates in
+ */
+async function fetchGroups() {
+  if (!socket || connectionStatus !== 'connected') {
+    throw new Error('Not connected to WhatsApp');
+  }
+
+  const groups = await socket.groupFetchAllParticipating();
+  return Object.values(groups).map(g => ({
+    id: g.id,
+    subject: g.subject || '',
+    participants: Array.isArray(g.participants) ? g.participants.length : 0,
+    owner: g.owner || null,
+    creation: g.creation || null
+  }));
+}
+
+/**
  * Disconnect from WhatsApp
  */
 async function disconnect() {
@@ -785,6 +803,7 @@ module.exports = {
   disconnect,
   sendMessage,
   sendMedia,
+  fetchGroups,
   getStatus,
   getQRCode,
   requestPairingCode,

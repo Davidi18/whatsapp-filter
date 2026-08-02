@@ -1245,6 +1245,118 @@
             transform: translateX(5px);
             box-shadow: -3px 0 0 #00ff9f;
         }
+
+        /* Pairing code UI */
+        .pairing-divider {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin: 20px 0 15px;
+            font-size: 10px;
+            letter-spacing: 1px;
+            opacity: 0.6;
+        }
+
+        .pairing-divider::before,
+        .pairing-divider::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: rgba(0,255,159,0.3);
+        }
+
+        .pairing-form {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .pairing-code {
+            font-size: 32px;
+            font-weight: 900;
+            letter-spacing: 6px;
+            color: #00ff9f;
+            text-shadow: 0 0 12px rgba(0,255,159,0.5);
+            padding: 15px;
+            margin: 15px auto 5px;
+            border: 2px dashed rgba(0,255,159,0.5);
+            border-radius: 8px;
+            display: inline-block;
+            cursor: pointer;
+            user-select: all;
+        }
+
+        .pairing-code:hover {
+            border-color: #00ff9f;
+            background: rgba(0,255,159,0.05);
+        }
+
+        /* Copyable values */
+        .copyable {
+            cursor: pointer;
+        }
+
+        .copyable:hover {
+            text-decoration: underline dotted;
+            text-underline-offset: 3px;
+        }
+
+        /* WhatsApp groups picker */
+        .wa-group-item {
+            display: grid;
+            grid-template-columns: 1fr auto auto;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 15px;
+            background: rgba(0,255,159,0.02);
+            border: 1px solid rgba(0,255,159,0.2);
+            border-radius: 6px;
+            margin-bottom: 8px;
+        }
+
+        .wa-group-item:hover {
+            border-color: rgba(0,255,159,0.4);
+            background: rgba(0,255,159,0.05);
+        }
+
+        .wa-group-info {
+            overflow: hidden;
+        }
+
+        .wa-group-name {
+            font-size: 13px;
+            font-weight: 600;
+            color: rgba(255,255,255,0.9);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .wa-group-id {
+            font-family: monospace;
+            font-size: 10px;
+            opacity: 0.5;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .wa-group-members {
+            font-size: 10px;
+            opacity: 0.6;
+            white-space: nowrap;
+        }
+
+        .wa-group-added {
+            font-size: 10px;
+            color: #00ff9f;
+            opacity: 0.7;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            padding: 6px 12px;
+        }
     </style>
 </head>
 <body>
@@ -1266,7 +1378,7 @@
         <div class="header">
             <span>&gt; FILTER CONTROL SYSTEM</span>
             <div class="header-right">
-                <span class="version-badge">v2.0</span>
+                <span class="version-badge" id="versionBadge">v2.2</span>
                 <button class="logout-btn" onclick="handleLogout()">LOGOUT</button>
             </div>
         </div>
@@ -1287,6 +1399,17 @@
                         </div>
                         <div class="qr-instructions" id="qrInstructions">
                             Open WhatsApp on your phone > Settings > Linked Devices > Link a Device
+                        </div>
+                        <div class="pairing-section hidden" id="pairingSection">
+                            <div class="pairing-divider"><span>OR PAIR WITH CODE (keeps phone notifications)</span></div>
+                            <div class="pairing-form">
+                                <input type="tel" class="input-field" id="pairingPhoneInput" placeholder="972547554964" style="max-width: 200px;">
+                                <button class="btn btn-small" onclick="requestPairingCode()">GET CODE</button>
+                            </div>
+                            <div class="pairing-code-result hidden" id="pairingCodeResult">
+                                <div class="pairing-code" id="pairingCodeDisplay" onclick="copyToClipboard(this.textContent)" title="Click to copy"></div>
+                                <div class="qr-instructions">WhatsApp > Settings > Linked Devices > Link a Device > Link with phone number</div>
+                            </div>
                         </div>
                         <div class="baileys-actions">
                             <button class="btn btn-small" onclick="reconnectBaileys()">RECONNECT</button>
@@ -1349,6 +1472,7 @@
                     <button class="btn btn-small" onclick="event.stopPropagation(); refreshEvents()">REFRESH</button>
                 </div>
                 <div class="section-content">
+                    <input type="text" class="input-field" id="eventSearchInput" placeholder="Search events by sender or message..." oninput="searchEvents(this.value)" style="margin-bottom: 12px; width: 100%;">
                     <div class="filter-tabs">
                         <button class="filter-tab active" data-filter="all" onclick="filterEvents('all')">ALL</button>
                         <button class="filter-tab" data-filter="forwarded" onclick="filterEvents('forwarded')">FORWARDED</button>
@@ -1482,7 +1606,10 @@
             </div>
 
             <div class="section">
-                <div class="section-header">+ ADD NEW GROUP</div>
+                <div class="section-header">
+                    <span>+ ADD NEW GROUP</span>
+                    <button class="btn btn-small" id="importGroupsBtn" onclick="openWaGroupsModal()">IMPORT FROM WHATSAPP</button>
+                </div>
                 <div class="section-content">
                     <div class="add-form form-group">
                         <div class="input-group">
@@ -1528,6 +1655,27 @@
                             <div class="empty-icon">⊗</div>
                             <div>NO GROUPS FOUND</div>
                         </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Backup & Restore -->
+            <div class="section collapsed">
+                <div class="section-header section-toggle" onclick="toggleSection(this)">
+                    <span><span class="toggle-icon">▼</span> BACKUP &amp; RESTORE</span>
+                </div>
+                <div class="section-content">
+                    <div style="background: rgba(0,255,159,0.05); border: 1px solid rgba(0,255,159,0.2); border-radius: 4px; padding: 10px; margin-bottom: 15px; font-size: 11px; opacity: 0.8;">
+                        Export contacts, groups, type webhooks and custom types to a JSON file, or restore from a previous backup.
+                    </div>
+                    <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+                        <button class="btn" onclick="exportConfig()">EXPORT CONFIG</button>
+                        <button class="btn" onclick="document.getElementById('importFileInput').click()">IMPORT CONFIG</button>
+                        <label style="display: flex; align-items: center; gap: 6px; font-size: 11px; cursor: pointer;">
+                            <input type="checkbox" id="importReplaceMode" style="accent-color: #00ff9f;">
+                            REPLACE EXISTING (instead of merge)
+                        </label>
+                        <input type="file" id="importFileInput" accept="application/json,.json" class="hidden" onchange="importConfigFile(this)">
                     </div>
                 </div>
             </div>
@@ -1698,12 +1846,16 @@
         // ============ TYPE MANAGEMENT ============
 
         function populateTypeSelects() {
-            // Populate contact type select
-            const contactTypeSelect = document.getElementById('typeSelect');
+            // Populate contact type select (preserve current selection)
+            const contactTypeSelect = document.getElementById('typeInput');
             if (contactTypeSelect) {
+                const current = contactTypeSelect.value;
                 contactTypeSelect.innerHTML = availableTypes.contact.map(t =>
                     `<option value="${t}">${t}</option>`
                 ).join('');
+                if (availableTypes.contact.includes(current)) {
+                    contactTypeSelect.value = current;
+                }
             }
 
             // Populate group type select
@@ -1739,10 +1891,23 @@
             const instructions = document.getElementById('qrInstructions');
             const qrSection = document.getElementById('qrSection');
             const baileysActions = document.querySelector('.baileys-actions');
+            const pairingSection = document.getElementById('pairingSection');
+
+            // Group import from WhatsApp is only available in Baileys mode
+            const importBtn = document.getElementById('importGroupsBtn');
+            if (importBtn) importBtn.classList.toggle('hidden', !data.enabled);
 
             if (!data.enabled) {
                 section.classList.add('hidden');
                 return;
+            }
+
+            // Pairing code is only possible while waiting for QR scan
+            if (pairingSection) {
+                pairingSection.classList.toggle('hidden', data.status !== 'waiting_qr');
+                if (data.status !== 'waiting_qr') {
+                    document.getElementById('pairingCodeResult')?.classList.add('hidden');
+                }
             }
 
             section.classList.remove('hidden');
@@ -1856,6 +2021,233 @@
                 }
             } catch (error) {
                 showToast('LOGOUT ERROR', 'error');
+            }
+        }
+
+        async function requestPairingCode() {
+            const input = document.getElementById('pairingPhoneInput');
+            const phone = input.value.trim().replace(/\D/g, '');
+
+            if (phone.length < 10 || phone.length > 15) {
+                showToast('INVALID PHONE NUMBER', 'error');
+                input.focus();
+                return;
+            }
+
+            showToast('REQUESTING CODE...');
+
+            try {
+                const response = await authFetch('/api/baileys/pairing-code', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ phone })
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.code) {
+                    document.getElementById('pairingCodeDisplay').textContent = data.code;
+                    document.getElementById('pairingCodeResult').classList.remove('hidden');
+                    showToast('PAIRING CODE READY');
+                } else {
+                    showToast(data.error || 'FAILED TO GET CODE', 'error');
+                }
+            } catch (error) {
+                showToast('CONNECTION ERROR', 'error');
+            }
+        }
+
+        // ============ CLIPBOARD ============
+
+        function copyToClipboard(text) {
+            if (!text) return;
+            if (navigator.clipboard?.writeText) {
+                navigator.clipboard.writeText(text).then(
+                    () => showToast('COPIED TO CLIPBOARD'),
+                    () => showToast('COPY FAILED', 'error')
+                );
+            } else {
+                // Fallback for non-secure contexts
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                document.body.appendChild(ta);
+                ta.select();
+                try {
+                    document.execCommand('copy');
+                    showToast('COPIED TO CLIPBOARD');
+                } catch (e) {
+                    showToast('COPY FAILED', 'error');
+                }
+                document.body.removeChild(ta);
+            }
+        }
+
+        // ============ WHATSAPP GROUPS IMPORT ============
+
+        let waGroups = [];
+
+        async function openWaGroupsModal() {
+            const modal = document.getElementById('waGroupsModal');
+            const body = document.getElementById('waGroupsBody');
+            const searchInput = document.getElementById('waGroupSearchInput');
+
+            modal.classList.add('active');
+            if (searchInput) searchInput.value = '';
+            body.innerHTML = '<div class="empty-state"><div class="blink">LOADING GROUPS...</div></div>';
+
+            try {
+                const response = await authFetch('/api/baileys/groups');
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to load groups');
+                }
+
+                waGroups = data.groups || [];
+                renderWaGroups();
+            } catch (error) {
+                body.innerHTML = `<div class="empty-state"><div>${escapeHtml(error.message)}</div><div style="font-size: 10px; opacity: 0.6; margin-top: 8px;">Requires an active Baileys connection</div></div>`;
+            }
+        }
+
+        function closeWaGroupsModal(e) {
+            if (e && e.target !== e.currentTarget) return;
+            document.getElementById('waGroupsModal').classList.remove('active');
+        }
+
+        function renderWaGroups(searchTerm) {
+            const body = document.getElementById('waGroupsBody');
+            const term = (searchTerm !== undefined ? searchTerm : document.getElementById('waGroupSearchInput')?.value || '').toLowerCase().trim();
+
+            let filtered = waGroups;
+            if (term) {
+                filtered = waGroups.filter(g =>
+                    g.subject.toLowerCase().includes(term) ||
+                    g.groupId.includes(term)
+                );
+            }
+
+            if (filtered.length === 0) {
+                body.innerHTML = `<div class="empty-state"><div>${term ? 'NO MATCHING GROUPS' : 'NO GROUPS FOUND'}</div></div>`;
+                return;
+            }
+
+            body.innerHTML = filtered.map(g => {
+                const alreadyAdded = g.alreadyAdded || groups.some(existing => existing.groupId === g.groupId);
+                return `
+                    <div class="wa-group-item">
+                        <div class="wa-group-info">
+                            <div class="wa-group-name">${escapeHtml(g.subject || 'Unnamed Group')}</div>
+                            <div class="wa-group-id copyable" onclick="copyToClipboard('${escapeHtml(g.groupId)}')" title="Click to copy">${escapeHtml(g.groupId)}</div>
+                        </div>
+                        <div class="wa-group-members">${g.participants} members</div>
+                        ${alreadyAdded
+                            ? '<span class="wa-group-added">✓ ADDED</span>'
+                            : `<button class="btn btn-small" onclick="addWaGroup('${escapeHtml(g.groupId)}', this)">ADD</button>`}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function addWaGroup(groupId, btnEl) {
+            const g = waGroups.find(x => x.groupId === groupId);
+            if (!g) return;
+
+            // Group subjects can be any length; the API requires 2-50 chars
+            let name = (g.subject || 'Unnamed Group').trim();
+            if (name.length < 2) name = 'Unnamed Group';
+            if (name.length > 50) name = name.slice(0, 50).trim();
+
+            if (btnEl) { btnEl.disabled = true; btnEl.textContent = '...'; }
+
+            try {
+                const response = await authFetch('/api/groups/add', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ groupId, name, type: 'GENERAL' })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    groups.push(data.group);
+                    g.alreadyAdded = true;
+                    renderWaGroups();
+                    renderGroups();
+                    loadSystemInfo();
+                    showToast('GROUP ADDED');
+                } else if (response.status === 409) {
+                    g.alreadyAdded = true;
+                    renderWaGroups();
+                    showToast('GROUP ALREADY EXISTS', 'error');
+                } else {
+                    throw new Error(data.error || 'Failed to add group');
+                }
+            } catch (error) {
+                showToast('FAILED TO ADD GROUP', 'error');
+                if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'ADD'; }
+            }
+        }
+
+        // ============ BACKUP & RESTORE ============
+
+        async function exportConfig() {
+            try {
+                const response = await authFetch('/api/config/export');
+                if (!response.ok) throw new Error('Export failed');
+
+                const blob = await response.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `whatsapp-filter-backup-${new Date().toISOString().slice(0, 10)}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                showToast('CONFIG EXPORTED');
+            } catch (error) {
+                showToast('EXPORT FAILED', 'error');
+            }
+        }
+
+        async function importConfigFile(input) {
+            const file = input.files?.[0];
+            input.value = ''; // allow re-selecting the same file
+            if (!file) return;
+
+            let backup;
+            try {
+                backup = JSON.parse(await file.text());
+            } catch (e) {
+                showToast('INVALID JSON FILE', 'error');
+                return;
+            }
+
+            const replace = document.getElementById('importReplaceMode')?.checked;
+            if (replace && !confirm('Replace ALL existing contacts, groups and type webhooks with the backup contents?')) {
+                return;
+            }
+
+            try {
+                const response = await authFetch('/api/config/import', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ...backup, mode: replace ? 'replace' : 'merge' })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    const r = data.results;
+                    showToast(`IMPORTED: ${r.contacts.added} CONTACTS, ${r.groups.added} GROUPS`);
+                    loadConfig();
+                    loadSystemInfo();
+                } else {
+                    showToast(data.error || 'IMPORT FAILED', 'error');
+                }
+            } catch (error) {
+                showToast('IMPORT FAILED', 'error');
             }
         }
 
@@ -2166,6 +2558,12 @@
                 if (response.ok) {
                     const data = await response.json();
 
+                    // Keep version badge in sync with the server
+                    if (data.version) {
+                        const badge = document.getElementById('versionBadge');
+                        if (badge) badge.textContent = `v${data.version}`;
+                    }
+
                     const hours = Math.floor(data.uptime / 3600);
                     const minutes = Math.floor((data.uptime % 3600) / 60);
                     const seconds = Math.floor(data.uptime % 60);
@@ -2229,6 +2627,13 @@
         // Store all events for filtering
         let allEvents = [];
         let currentFilter = 'all';
+        let eventSearchTerm = '';
+
+        // Free-text search across events
+        function searchEvents(term) {
+            eventSearchTerm = (term || '').toLowerCase().trim();
+            renderEvents(filterEventsByAction(allEvents, currentFilter));
+        }
 
         // Load recent events
         async function loadRecentEvents() {
@@ -2244,15 +2649,28 @@
             }
         }
 
-        // Filter events by action or source type
+        // Filter events by action or source type, then apply free-text search
         function filterEventsByAction(events, filter) {
-            if (filter === 'all') return events;
-            // Source type filters
-            if (filter === 'group' || filter === 'contact') {
-                return events.filter(e => e.sourceType === filter);
+            let result = events;
+
+            if (filter !== 'all') {
+                if (filter === 'group' || filter === 'contact') {
+                    result = result.filter(e => e.sourceType === filter);
+                } else {
+                    result = result.filter(e => e.action === filter);
+                }
             }
-            // Action filters
-            return events.filter(e => e.action === filter);
+
+            if (eventSearchTerm) {
+                result = result.filter(e =>
+                    (e.senderName || '').toLowerCase().includes(eventSearchTerm) ||
+                    (e.source || '').toLowerCase().includes(eventSearchTerm) ||
+                    (e.messagePreview || '').toLowerCase().includes(eventSearchTerm) ||
+                    (e.messageBody || '').toLowerCase().includes(eventSearchTerm)
+                );
+            }
+
+            return result;
         }
 
         // Filter events (called from tabs)
@@ -2428,10 +2846,11 @@
             document.getElementById('eventModal').classList.remove('active');
         }
 
-        // Close modal on Escape key
+        // Close modals on Escape key
         document.addEventListener('keydown', function(e) {
             if (e.key === 'Escape') {
                 closeEventModal();
+                closeWaGroupsModal();
             }
         });
 
@@ -2546,16 +2965,21 @@
 
             list.innerHTML = filtered.map((contact, index) => {
                 const realIndex = contacts.indexOf(contact);
-                const typeClass = `type-${(contact.type || 'personal').toLowerCase()}`;
+                const currentType = contact.type || 'PERSONAL';
+                const typeClass = `type-${currentType.toLowerCase()}`;
+                // Include the contact's type even if it's no longer in the available list
+                const contactTypes = availableTypes.contact.includes(currentType)
+                    ? availableTypes.contact
+                    : [...availableTypes.contact, currentType];
+                const typeOptions = contactTypes.map(t =>
+                    `<option value="${t}" ${currentType === t ? 'selected' : ''}>${t}</option>`
+                ).join('');
                 return `
                     <div class="contact-item">
-                        <div class="contact-number">${escapeHtml(contact.phone)}</div>
+                        <div class="contact-number copyable" onclick="copyToClipboard('${escapeHtml(contact.phone)}')" title="Click to copy">${escapeHtml(contact.phone)}</div>
                         <div class="contact-name">${escapeHtml(contact.name)}</div>
                         <select class="contact-type-select ${typeClass}" onchange="updateContactType(${realIndex}, this.value)" title="Click to change type">
-                            <option value="PERSONAL" ${contact.type === 'PERSONAL' ? 'selected' : ''}>PERSONAL</option>
-                            <option value="BUSINESS" ${contact.type === 'BUSINESS' ? 'selected' : ''}>BUSINESS</option>
-                            <option value="VIP" ${contact.type === 'VIP' ? 'selected' : ''}>VIP</option>
-                            <option value="TEMP" ${contact.type === 'TEMP' ? 'selected' : ''}>TEMP</option>
+                            ${typeOptions}
                         </select>
                         <button class="remove-btn" onclick="removeContact(${realIndex})" title="Remove contact">×</button>
                     </div>
@@ -2704,7 +3128,7 @@
                 ).join('');
                 return `
                     <div class="contact-item group-item">
-                        <div class="contact-number">${escapeHtml(group.groupId)}</div>
+                        <div class="contact-number copyable" onclick="copyToClipboard('${escapeHtml(group.groupId)}')" title="Click to copy">${escapeHtml(group.groupId)}</div>
                         <div class="contact-name">${escapeHtml(group.name)}</div>
                         <select class="contact-type-select ${typeClass}" onchange="updateGroupType(${realIndex}, this.value)" title="Click to change type">
                             ${typeOptions}
@@ -2918,6 +3342,22 @@
             }
         })();
     </script>
+
+    <!-- WhatsApp Groups Import Modal -->
+    <div class="event-modal-overlay" id="waGroupsModal" onclick="closeWaGroupsModal(event)">
+        <div class="event-modal" onclick="event.stopPropagation()">
+            <div class="event-modal-header">
+                <span>IMPORT GROUPS FROM WHATSAPP</span>
+                <button class="event-modal-close" onclick="closeWaGroupsModal()">&times;</button>
+            </div>
+            <div class="event-modal-body">
+                <input type="text" class="input-field" id="waGroupSearchInput" placeholder="Search groups..." oninput="renderWaGroups(this.value)" style="margin-bottom: 12px; width: 100%;">
+                <div id="waGroupsBody">
+                    <div class="empty-state"><div class="blink">LOADING GROUPS...</div></div>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- Event Detail Modal -->
     <div class="event-modal-overlay" id="eventModal" onclick="closeEventModal(event)">

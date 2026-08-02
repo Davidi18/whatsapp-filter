@@ -31,7 +31,7 @@ const { isValidPhone, isValidGroupId, isValidContactType, isValidGroupType, isVa
 const app = express();
 app.set('trust proxy', 1); // Trust first proxy (nginx, Cloudflare, etc.)
 const PORT = process.env.PORT || 3000;
-const VERSION = '2.1.0';
+const VERSION = '2.2.0';
 const startedAt = new Date().toISOString();
 const BAILEYS_ENABLED = process.env.BAILEYS_ENABLED === 'true';
 
@@ -641,6 +641,32 @@ app.post('/api/baileys/send', async (req, res) => {
   }
 });
 
+// List WhatsApp groups the connected account participates in (for import picker)
+app.get('/api/baileys/groups', async (req, res) => {
+  if (!BAILEYS_ENABLED) {
+    return res.status(400).json({ error: 'Baileys mode is not enabled' });
+  }
+
+  try {
+    const waGroups = await baileysService.fetchGroups();
+    const authorizedIds = new Set((config.allowedGroups || []).map(g => normalizeGroupId(g.groupId)));
+
+    const groups = waGroups
+      .map(g => ({
+        groupId: normalizeGroupId(g.id),
+        subject: g.subject,
+        participants: g.participants,
+        alreadyAdded: authorizedIds.has(normalizeGroupId(g.id))
+      }))
+      .sort((a, b) => a.subject.localeCompare(b.subject));
+
+    res.json({ groups, total: groups.length });
+  } catch (error) {
+    logger.error('Failed to fetch WhatsApp groups', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Get configuration
 app.get('/api/config', (req, res) => {
   const validators = require('./utils/validators');
@@ -658,6 +684,106 @@ app.get('/api/config', (req, res) => {
       group: validators.getValidGroupTypes()
     }
   });
+});
+
+// Export configuration as a downloadable backup
+app.get('/api/config/export', (req, res) => {
+  const backup = {
+    exportedAt: new Date().toISOString(),
+    version: VERSION,
+    allowedNumbers: config.allowedNumbers || [],
+    allowedGroups: config.allowedGroups || [],
+    typeWebhooks: config.typeWebhooks || {},
+    customContactTypes: config.customContactTypes || [],
+    customGroupTypes: config.customGroupTypes || []
+  };
+
+  const filename = `whatsapp-filter-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.json(backup);
+});
+
+// Import configuration from a backup (merge by default, replace with mode=replace)
+app.post('/api/config/import', async (req, res) => {
+  try {
+    const validators = require('./utils/validators');
+    const { allowedNumbers, allowedGroups, typeWebhooks, customContactTypes, customGroupTypes, mode } = req.body;
+    const replace = mode === 'replace';
+
+    // Apply custom types first so imported entries using them pass validation
+    if (Array.isArray(customContactTypes)) {
+      config.customContactTypes = customContactTypes
+        .filter(t => typeof t === 'string' && t.length >= 2 && t.length <= 20)
+        .map(t => t.toUpperCase());
+    }
+    if (Array.isArray(customGroupTypes)) {
+      config.customGroupTypes = customGroupTypes
+        .filter(t => typeof t === 'string' && t.length >= 2 && t.length <= 20)
+        .map(t => t.toUpperCase());
+    }
+    validators.setCustomTypes(config.customContactTypes || [], config.customGroupTypes || []);
+
+    const results = { contacts: { added: 0, skipped: 0 }, groups: { added: 0, skipped: 0 } };
+
+    if (Array.isArray(allowedNumbers)) {
+      if (replace) config.allowedNumbers = [];
+      for (const c of allowedNumbers) {
+        if (!c || !isValidPhone(c.phone || '') || !isValidName(c.name || '') || !isValidContactType(c.type)) {
+          results.contacts.skipped++;
+          continue;
+        }
+        if (config.allowedNumbers.some(existing => existing.phone === c.phone)) {
+          results.contacts.skipped++;
+          continue;
+        }
+        config.allowedNumbers.push({ phone: c.phone, name: c.name, type: c.type });
+        results.contacts.added++;
+      }
+    }
+
+    if (Array.isArray(allowedGroups)) {
+      if (replace) config.allowedGroups = [];
+      if (!config.allowedGroups) config.allowedGroups = [];
+      for (const g of allowedGroups) {
+        const groupId = normalizeGroupId(g?.groupId || '');
+        if (!g || !isValidGroupId(groupId) || !isValidName(g.name || '') || !isValidGroupType(g.type)) {
+          results.groups.skipped++;
+          continue;
+        }
+        if (config.allowedGroups.some(existing => normalizeGroupId(existing.groupId) === groupId)) {
+          results.groups.skipped++;
+          continue;
+        }
+        config.allowedGroups.push({ groupId, name: g.name, type: g.type });
+        results.groups.added++;
+      }
+    }
+
+    if (typeWebhooks && typeof typeWebhooks === 'object') {
+      const cleaned = replace ? {} : { ...(config.typeWebhooks || {}) };
+      for (const [type, url] of Object.entries(typeWebhooks)) {
+        if (url && typeof url === 'string' && url.trim()) {
+          try {
+            new URL(url);
+            cleaned[type] = url.trim();
+          } catch {
+            // skip invalid URLs
+          }
+        }
+      }
+      config.typeWebhooks = cleaned;
+      webhookService.setTypeWebhooks(cleaned);
+    }
+
+    eventRouter.setConfig(config);
+    await saveConfig();
+
+    logger.info('Configuration imported', { mode: replace ? 'replace' : 'merge', ...results });
+    res.json({ success: true, mode: replace ? 'replace' : 'merge', results });
+  } catch (error) {
+    logger.error('Failed to import config', { error: error.message });
+    res.status(500).json({ error: 'Failed to import configuration' });
+  }
 });
 
 // Update webhook URL
@@ -1155,14 +1281,6 @@ app.post('/api/test-alert', async (req, res) => {
   }
 });
 
-// Webhook URL is read-only
-app.post('/api/webhook', (req, res) => {
-  res.status(400).json({
-    error: 'Webhook URL is configured via WEBHOOK_URL environment variable',
-    current_url: config.webhookUrl
-  });
-});
-
 // ============ MESSAGE STORAGE ENDPOINTS ============
 
 // Get messages for a phone number
@@ -1207,6 +1325,11 @@ app.delete('/api/messages/:phone', async (req, res) => {
 
 // ============ MEDIA ENDPOINTS ============
 
+// Get media stats (must be registered before /api/media/:id)
+app.get('/api/media/stats', (req, res) => {
+  res.json(mediaStore.getStats());
+});
+
 // Serve media file by ID
 app.get('/api/media/:id', async (req, res) => {
   const media = mediaStore.getMedia(req.params.id);
@@ -1224,11 +1347,6 @@ app.get('/api/media/:id', async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: 'Failed to serve media' });
   }
-});
-
-// Get media stats
-app.get('/api/media/stats', (req, res) => {
-  res.json(mediaStore.getStats());
 });
 
 // 404 handler
