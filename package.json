@@ -1,6 +1,6 @@
 {
   "name": "whatsapp-filter",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "WhatsApp message filter with Baileys integration, multi-event support, alerts, and retro UI",
   "main": "server.js",
   "scripts": {

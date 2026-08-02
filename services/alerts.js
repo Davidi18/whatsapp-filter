@@ -24,6 +24,56 @@ const LEVEL_ICONS = {
   info: ':large_green_circle:'
 };
 
+const TELEGRAM_ICONS = {
+  critical: '\u{1F534}', // red circle
+  warning: '\u{26A0}\u{FE0F}', // warning sign
+  info: '\u{1F7E2}' // green circle
+};
+
+// Per-event cooldown so reconnect loops don't spam every channel
+const ALERT_COOLDOWN_MS = parseInt(process.env.ALERT_COOLDOWN_MS) || 5 * 60 * 1000;
+const lastSentAt = new Map();
+
+// Alerts webhook settings - env takes precedence, otherwise configurable at runtime (from UI)
+// Formats: 'generic' (raw alert JSON) or 'aos' (Agency-OS /api/notifications shape)
+const WEBHOOK_FORMATS = ['generic', 'aos'];
+let alertsWebhookUrl = process.env.ALERTS_WEBHOOK_URL || '';
+let alertsWebhookToken = process.env.ALERTS_WEBHOOK_TOKEN || '';
+let alertsWebhookFormat = WEBHOOK_FORMATS.includes((process.env.ALERTS_WEBHOOK_FORMAT || '').toLowerCase())
+  ? process.env.ALERTS_WEBHOOK_FORMAT.toLowerCase()
+  : 'generic';
+
+/**
+ * Update alerts webhook settings at runtime.
+ * Fields locked by env vars are ignored; undefined fields are left unchanged.
+ */
+function setWebhookConfig({ url, token, format } = {}) {
+  if (url !== undefined && !process.env.ALERTS_WEBHOOK_URL) {
+    alertsWebhookUrl = (url || '').trim();
+  }
+  if (token !== undefined && !process.env.ALERTS_WEBHOOK_TOKEN) {
+    alertsWebhookToken = (token || '').trim();
+  }
+  if (format !== undefined && !process.env.ALERTS_WEBHOOK_FORMAT) {
+    const f = (format || 'generic').toLowerCase();
+    if (WEBHOOK_FORMATS.includes(f)) {
+      alertsWebhookFormat = f;
+    }
+  }
+}
+
+function getWebhookUrl() {
+  return alertsWebhookUrl;
+}
+
+function getWebhookConfig() {
+  return {
+    url: alertsWebhookUrl,
+    token: alertsWebhookToken,
+    format: alertsWebhookFormat
+  };
+}
+
 /**
  * Send alert to all configured channels
  */
@@ -52,16 +102,32 @@ async function send(alert) {
 
   logger.alert(level, event, message);
 
+  // Throttle repeated alerts for the same event+level (test alerts are never throttled)
+  if (event !== 'test') {
+    const cooldownKey = `${event}:${level}`;
+    const last = lastSentAt.get(cooldownKey);
+    if (last && Date.now() - last < ALERT_COOLDOWN_MS) {
+      logger.debug('Alert suppressed by cooldown', { event, level });
+      return { sent: false, reason: 'cooldown' };
+    }
+    lastSentAt.set(cooldownKey, Date.now());
+  }
+
   const promises = [];
 
   // Send to alerts webhook
-  if (process.env.ALERTS_WEBHOOK_URL) {
+  if (alertsWebhookUrl) {
     promises.push(sendToWebhook(alertPayload));
   }
 
   // Send to Slack for critical and warning alerts
   if (process.env.SLACK_WEBHOOK_URL && (level === ALERT_LEVELS.CRITICAL || level === ALERT_LEVELS.WARNING)) {
     promises.push(sendToSlack(alertPayload));
+  }
+
+  // Send to Telegram (all levels)
+  if (process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID) {
+    promises.push(sendToTelegram(alertPayload));
   }
 
   if (promises.length === 0) {
@@ -83,23 +149,59 @@ async function send(alert) {
  * Send alert to webhook endpoint
  */
 async function sendToWebhook(payload) {
-  const url = process.env.ALERTS_WEBHOOK_URL;
+  const url = alertsWebhookUrl;
   if (!url) return;
 
+  const headers = {
+    'Content-Type': 'application/json',
+    'X-Alert-Source': 'whatsapp-filter',
+    'X-Alert-Level': payload.level
+  };
+  if (alertsWebhookToken) {
+    headers['Authorization'] = `Bearer ${alertsWebhookToken}`;
+  }
+
+  const body = alertsWebhookFormat === 'aos' ? formatAosNotification(payload) : payload;
+
   try {
-    await axios.post(url, payload, {
-      timeout: 5000,
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Alert-Source': 'whatsapp-filter',
-        'X-Alert-Level': payload.level
-      }
-    });
-    logger.debug('Alert sent to webhook', { event: payload.event });
+    await axios.post(url, body, { timeout: 5000, headers });
+    logger.debug('Alert sent to webhook', { event: payload.event, format: alertsWebhookFormat });
   } catch (error) {
-    logger.error('Failed to send alert to webhook', { error: error.message });
+    logger.error('Failed to send alert to webhook', {
+      error: error.response ? `HTTP ${error.response.status}: ${JSON.stringify(error.response.data).slice(0, 200)}` : error.message,
+      format: alertsWebhookFormat
+    });
     throw error;
   }
+}
+
+/**
+ * Format alert for Agency-OS POST /api/notifications.
+ * Only `title` is required; accepted types: info, report, communication, task, payment.
+ */
+function formatAosNotification(payload) {
+  const bodyLines = [payload.message];
+  if (payload.details?.reason) bodyLines.push(`Reason: ${payload.details.reason}`);
+  if (payload.details?.phoneNumber) bodyLines.push(`Phone: ${payload.details.phoneNumber}`);
+  if (payload.details?.status) bodyLines.push(`Status: ${payload.details.status}`);
+  if (payload.details?.consecutiveFailures) bodyLines.push(`Consecutive failures: ${payload.details.consecutiveFailures}`);
+
+  const levelPrefix = payload.level === 'critical'
+    ? `${TELEGRAM_ICONS.critical} `
+    : payload.level === 'warning' ? `${TELEGRAM_ICONS.warning} ` : '';
+
+  return {
+    title: `${levelPrefix}${payload.title}`,
+    body: bodyLines.filter(Boolean).join('\n'),
+    type: 'info',
+    source: process.env.INSTANCE_NAME || 'whatsapp-filter',
+    payload: {
+      url: '/notifications',
+      event: payload.event,
+      level: payload.level,
+      alertId: payload.id
+    }
+  };
 }
 
 /**
@@ -123,6 +225,48 @@ async function sendToSlack(payload) {
     logger.error('Failed to send alert to Slack', { error: error.message });
     throw error;
   }
+}
+
+/**
+ * Send alert to Telegram (direct bot API - no middleman needed)
+ */
+async function sendToTelegram(payload) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+  if (!token || !chatId) return;
+
+  const icon = TELEGRAM_ICONS[payload.level] || TELEGRAM_ICONS.info;
+  const lines = [
+    `${icon} <b>${escapeTelegramHtml(payload.title)}</b>`,
+    '',
+    escapeTelegramHtml(payload.message)
+  ];
+
+  const detailLines = [];
+  if (payload.details?.reason) detailLines.push(`Reason: ${escapeTelegramHtml(String(payload.details.reason))}`);
+  if (payload.details?.phoneNumber) detailLines.push(`Phone: ${escapeTelegramHtml(String(payload.details.phoneNumber))}`);
+  if (payload.details?.status) detailLines.push(`Status: ${escapeTelegramHtml(String(payload.details.status))}`);
+  if (detailLines.length > 0) {
+    lines.push('', ...detailLines);
+  }
+  lines.push('', `<i>${escapeTelegramHtml(payload.instance)} · ${new Date(payload.timestamp).toLocaleString()}</i>`);
+
+  try {
+    await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
+      chat_id: chatId,
+      text: lines.join('\n'),
+      parse_mode: 'HTML',
+      disable_web_page_preview: true
+    }, { timeout: 5000 });
+    logger.debug('Alert sent to Telegram', { event: payload.event });
+  } catch (error) {
+    logger.error('Failed to send alert to Telegram', { error: error.response?.data?.description || error.message });
+    throw error;
+  }
+}
+
+function escapeTelegramHtml(text) {
+  return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 /**
@@ -240,8 +384,28 @@ async function test() {
   return await send(testAlert);
 }
 
+/**
+ * Get configured alert channels (for UI status display)
+ */
+function getChannels() {
+  return {
+    telegram: !!(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID),
+    slack: !!process.env.SLACK_WEBHOOK_URL,
+    webhook: !!alertsWebhookUrl,
+    webhookUrl: alertsWebhookUrl,
+    webhookFromEnv: !!process.env.ALERTS_WEBHOOK_URL,
+    webhookFormat: alertsWebhookFormat,
+    webhookHasToken: !!alertsWebhookToken,
+    cooldownMs: ALERT_COOLDOWN_MS
+  };
+}
+
 module.exports = {
   ALERT_LEVELS,
   send,
-  test
+  test,
+  getChannels,
+  setWebhookConfig,
+  getWebhookConfig,
+  getWebhookUrl
 };

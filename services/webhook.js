@@ -18,6 +18,10 @@ let lastSuccess = null;
 let lastError = null;
 let consecutiveFailures = 0;
 
+// Alert once when failures cross the threshold, and once more on recovery
+const FAILURE_ALERT_THRESHOLD = parseInt(process.env.WEBHOOK_FAILURE_ALERT_THRESHOLD) || 5;
+let failureAlertSent = false;
+
 // Secondary webhook stats
 let secondaryStats = {
   lastSuccess: null,
@@ -192,6 +196,13 @@ async function forward(payload, metadata = {}) {
       consecutiveFailures = 0;
       lastError = null;
 
+      // Notify recovery after a failing streak
+      if (failureAlertSent) {
+        failureAlertSent = false;
+        notifyAlert('info', 'webhook_recovered', 'Webhook Delivery Recovered',
+          'Message forwarding to the webhook is working again.', { url: targetUrl });
+      }
+
       if (entityType) {
         if (!typeStats[entityType]) typeStats[entityType] = { successes: 0, failures: 0, lastSuccess: null };
         typeStats[entityType].successes++;
@@ -238,7 +249,33 @@ async function forward(payload, metadata = {}) {
     error: lastAttemptError.message, consecutiveFailures, maxRetries: MAX_RETRIES
   });
 
+  // Alert once when deliveries keep failing - messages are being lost
+  if (consecutiveFailures >= FAILURE_ALERT_THRESHOLD && !failureAlertSent) {
+    failureAlertSent = true;
+    notifyAlert('critical', 'webhook_failing', 'Webhook Delivery Failing',
+      `Failed to deliver messages to the webhook ${consecutiveFailures} times in a row. Messages are NOT reaching their destination.`,
+      { url: targetUrl, consecutiveFailures, lastError: lastAttemptError.message });
+  }
+
   throw lastAttemptError;
+}
+
+/**
+ * Fire an alert without creating a circular import at load time
+ */
+function notifyAlert(level, event, title, message, details) {
+  try {
+    const alertService = require('./alerts');
+    alertService.send({
+      level,
+      event,
+      title,
+      message,
+      details
+    }).catch(() => {});
+  } catch (e) {
+    logger.debug('Alert dispatch failed', { error: e.message });
+  }
 }
 
 /**

@@ -1245,6 +1245,118 @@
             transform: translateX(5px);
             box-shadow: -3px 0 0 #00ff9f;
         }
+
+        /* Pairing code UI */
+        .pairing-divider {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin: 20px 0 15px;
+            font-size: 10px;
+            letter-spacing: 1px;
+            opacity: 0.6;
+        }
+
+        .pairing-divider::before,
+        .pairing-divider::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: rgba(0,255,159,0.3);
+        }
+
+        .pairing-form {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .pairing-code {
+            font-size: 32px;
+            font-weight: 900;
+            letter-spacing: 6px;
+            color: #00ff9f;
+            text-shadow: 0 0 12px rgba(0,255,159,0.5);
+            padding: 15px;
+            margin: 15px auto 5px;
+            border: 2px dashed rgba(0,255,159,0.5);
+            border-radius: 8px;
+            display: inline-block;
+            cursor: pointer;
+            user-select: all;
+        }
+
+        .pairing-code:hover {
+            border-color: #00ff9f;
+            background: rgba(0,255,159,0.05);
+        }
+
+        /* Copyable values */
+        .copyable {
+            cursor: pointer;
+        }
+
+        .copyable:hover {
+            text-decoration: underline dotted;
+            text-underline-offset: 3px;
+        }
+
+        /* WhatsApp groups picker */
+        .wa-group-item {
+            display: grid;
+            grid-template-columns: 1fr auto auto;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 15px;
+            background: rgba(0,255,159,0.02);
+            border: 1px solid rgba(0,255,159,0.2);
+            border-radius: 6px;
+            margin-bottom: 8px;
+        }
+
+        .wa-group-item:hover {
+            border-color: rgba(0,255,159,0.4);
+            background: rgba(0,255,159,0.05);
+        }
+
+        .wa-group-info {
+            overflow: hidden;
+        }
+
+        .wa-group-name {
+            font-size: 13px;
+            font-weight: 600;
+            color: rgba(255,255,255,0.9);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .wa-group-id {
+            font-family: monospace;
+            font-size: 10px;
+            opacity: 0.5;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .wa-group-members {
+            font-size: 10px;
+            opacity: 0.6;
+            white-space: nowrap;
+        }
+
+        .wa-group-added {
+            font-size: 10px;
+            color: #00ff9f;
+            opacity: 0.7;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            padding: 6px 12px;
+        }
     </style>
 </head>
 <body>
@@ -1266,7 +1378,7 @@
         <div class="header">
             <span>&gt; FILTER CONTROL SYSTEM</span>
             <div class="header-right">
-                <span class="version-badge">v2.0</span>
+                <span class="version-badge" id="versionBadge">v2.2</span>
                 <button class="logout-btn" onclick="handleLogout()">LOGOUT</button>
             </div>
         </div>
@@ -1287,6 +1399,17 @@
                         </div>
                         <div class="qr-instructions" id="qrInstructions">
                             Open WhatsApp on your phone > Settings > Linked Devices > Link a Device
+                        </div>
+                        <div class="pairing-section hidden" id="pairingSection">
+                            <div class="pairing-divider"><span>OR PAIR WITH CODE (keeps phone notifications)</span></div>
+                            <div class="pairing-form">
+                                <input type="tel" class="input-field" id="pairingPhoneInput" placeholder="972547554964" style="max-width: 200px;">
+                                <button class="btn btn-small" onclick="requestPairingCode()">GET CODE</button>
+                            </div>
+                            <div class="pairing-code-result hidden" id="pairingCodeResult">
+                                <div class="pairing-code" id="pairingCodeDisplay" onclick="copyToClipboard(this.textContent)" title="Click to copy"></div>
+                                <div class="qr-instructions">WhatsApp > Settings > Linked Devices > Link a Device > Link with phone number</div>
+                            </div>
                         </div>
                         <div class="baileys-actions">
                             <button class="btn btn-small" onclick="reconnectBaileys()">RECONNECT</button>
@@ -1346,9 +1469,13 @@
             <div class="section">
                 <div class="section-header section-toggle" onclick="toggleSection(this)">
                     <span><span class="toggle-icon">▼</span> RECENT EVENTS</span>
-                    <button class="btn btn-small" onclick="event.stopPropagation(); refreshEvents()">REFRESH</button>
+                    <span style="display: flex; align-items: center; gap: 10px;">
+                        <span id="eventsUpdatedAt" style="font-size: 9px; opacity: 0.6; font-family: monospace; text-transform: none;"></span>
+                        <button class="btn btn-small" onclick="event.stopPropagation(); refreshEvents()">REFRESH</button>
+                    </span>
                 </div>
                 <div class="section-content">
+                    <input type="text" class="input-field" id="eventSearchInput" placeholder="Search events by sender or message..." oninput="searchEvents(this.value)" style="margin-bottom: 12px; width: 100%;">
                     <div class="filter-tabs">
                         <button class="filter-tab active" data-filter="all" onclick="filterEvents('all')">ALL</button>
                         <button class="filter-tab" data-filter="forwarded" onclick="filterEvents('forwarded')">FORWARDED</button>
@@ -1427,6 +1554,69 @@
                 </div>
             </div>
 
+            <!-- Alerts & Monitoring -->
+            <div class="section collapsed">
+                <div class="section-header section-toggle" onclick="toggleSection(this)">
+                    <span><span class="toggle-icon">▼</span> ALERTS &amp; MONITORING</span>
+                    <span id="alertsSentCount" style="font-size: 10px; opacity: 0.7;"></span>
+                </div>
+                <div class="section-content">
+                    <div style="background: rgba(0,255,159,0.05); border: 1px solid rgba(0,255,159,0.2); border-radius: 4px; padding: 10px; margin-bottom: 15px; font-size: 11px; opacity: 0.8; line-height: 1.6;">
+                        Get notified when WhatsApp disconnects, reconnection fails, or webhook delivery breaks.
+                        Server channels are configured via environment variables:
+                        <span style="font-family: monospace;">TELEGRAM_BOT_TOKEN</span> + <span style="font-family: monospace;">TELEGRAM_CHAT_ID</span>,
+                        <span style="font-family: monospace;">SLACK_WEBHOOK_URL</span>,
+                        <span style="font-family: monospace;">ALERTS_WEBHOOK_URL</span>.
+                    </div>
+                    <div class="event-stats-grid" id="alertChannelsList">
+                        <!-- Populated by JS -->
+                    </div>
+                    <div id="alertsWebhookEnvWarning" class="hidden" style="background: rgba(255,165,0,0.1); border: 1px solid rgba(255,165,0,0.3); border-radius: 4px; padding: 10px; margin-top: 15px; font-size: 11px; color: #ffa500;">
+                        Alerts webhook URL is set via environment variable and cannot be changed from UI
+                    </div>
+                    <div class="add-form form-webhook" style="margin-top: 15px;">
+                        <div class="input-group">
+                            <div class="input-label">ALERTS WEBHOOK URL (your interface)</div>
+                            <input
+                                type="url"
+                                class="input-field"
+                                placeholder="https://agency-os.online/api/notifications"
+                                id="alertsWebhookInput"
+                            >
+                        </div>
+                        <div class="input-group no-label">
+                            <button class="btn" onclick="saveAlertsWebhook()">SAVE</button>
+                        </div>
+                        <div class="input-group no-label">
+                            <button class="btn" onclick="testAlert()">TEST</button>
+                        </div>
+                    </div>
+                    <div class="add-form" style="margin-top: 12px; grid-template-columns: 1fr auto;">
+                        <div class="input-group">
+                            <div class="input-label">BEARER TOKEN (Authorization header)</div>
+                            <input
+                                type="password"
+                                class="input-field"
+                                placeholder="paste token..."
+                                id="alertsTokenInput"
+                                oninput="this.dataset.dirty='1'"
+                                autocomplete="off"
+                            >
+                        </div>
+                        <div class="input-group">
+                            <div class="input-label">PAYLOAD FORMAT</div>
+                            <select class="input-field" id="alertsFormatSelect" style="min-width: 160px;">
+                                <option value="generic">GENERIC JSON</option>
+                                <option value="aos">AOS NOTIFICATION</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div style="margin-top: 15px; display: flex; gap: 10px; flex-wrap: wrap;">
+                        <button class="btn" id="browserAlertsBtn" onclick="toggleBrowserAlerts()">BROWSER ALERTS: OFF</button>
+                    </div>
+                </div>
+            </div>
+
             <div class="section">
                 <div class="section-header">+ ADD NEW CONTACT</div>
                 <div class="section-content">
@@ -1482,7 +1672,10 @@
             </div>
 
             <div class="section">
-                <div class="section-header">+ ADD NEW GROUP</div>
+                <div class="section-header">
+                    <span>+ ADD NEW GROUP</span>
+                    <button class="btn btn-small" id="importGroupsBtn" onclick="openWaGroupsModal()">IMPORT FROM WHATSAPP</button>
+                </div>
                 <div class="section-content">
                     <div class="add-form form-group">
                         <div class="input-group">
@@ -1528,6 +1721,27 @@
                             <div class="empty-icon">⊗</div>
                             <div>NO GROUPS FOUND</div>
                         </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Backup & Restore -->
+            <div class="section collapsed">
+                <div class="section-header section-toggle" onclick="toggleSection(this)">
+                    <span><span class="toggle-icon">▼</span> BACKUP &amp; RESTORE</span>
+                </div>
+                <div class="section-content">
+                    <div style="background: rgba(0,255,159,0.05); border: 1px solid rgba(0,255,159,0.2); border-radius: 4px; padding: 10px; margin-bottom: 15px; font-size: 11px; opacity: 0.8;">
+                        Export contacts, groups, type webhooks and custom types to a JSON file, or restore from a previous backup.
+                    </div>
+                    <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+                        <button class="btn" onclick="exportConfig()">EXPORT CONFIG</button>
+                        <button class="btn" onclick="document.getElementById('importFileInput').click()">IMPORT CONFIG</button>
+                        <label style="display: flex; align-items: center; gap: 6px; font-size: 11px; cursor: pointer;">
+                            <input type="checkbox" id="importReplaceMode" style="accent-color: #00ff9f;">
+                            REPLACE EXISTING (instead of merge)
+                        </label>
+                        <input type="file" id="importFileInput" accept="application/json,.json" class="hidden" onchange="importConfigFile(this)">
                     </div>
                 </div>
             </div>
@@ -1698,12 +1912,16 @@
         // ============ TYPE MANAGEMENT ============
 
         function populateTypeSelects() {
-            // Populate contact type select
-            const contactTypeSelect = document.getElementById('typeSelect');
+            // Populate contact type select (preserve current selection)
+            const contactTypeSelect = document.getElementById('typeInput');
             if (contactTypeSelect) {
+                const current = contactTypeSelect.value;
                 contactTypeSelect.innerHTML = availableTypes.contact.map(t =>
                     `<option value="${t}">${t}</option>`
                 ).join('');
+                if (availableTypes.contact.includes(current)) {
+                    contactTypeSelect.value = current;
+                }
             }
 
             // Populate group type select
@@ -1739,10 +1957,23 @@
             const instructions = document.getElementById('qrInstructions');
             const qrSection = document.getElementById('qrSection');
             const baileysActions = document.querySelector('.baileys-actions');
+            const pairingSection = document.getElementById('pairingSection');
+
+            // Group import from WhatsApp is only available in Baileys mode
+            const importBtn = document.getElementById('importGroupsBtn');
+            if (importBtn) importBtn.classList.toggle('hidden', !data.enabled);
 
             if (!data.enabled) {
                 section.classList.add('hidden');
                 return;
+            }
+
+            // Pairing code is only possible while waiting for QR scan
+            if (pairingSection) {
+                pairingSection.classList.toggle('hidden', data.status !== 'waiting_qr');
+                if (data.status !== 'waiting_qr') {
+                    document.getElementById('pairingCodeResult')?.classList.add('hidden');
+                }
             }
 
             section.classList.remove('hidden');
@@ -1856,6 +2087,416 @@
                 }
             } catch (error) {
                 showToast('LOGOUT ERROR', 'error');
+            }
+        }
+
+        async function requestPairingCode() {
+            const input = document.getElementById('pairingPhoneInput');
+            const phone = input.value.trim().replace(/\D/g, '');
+
+            if (phone.length < 10 || phone.length > 15) {
+                showToast('INVALID PHONE NUMBER', 'error');
+                input.focus();
+                return;
+            }
+
+            showToast('REQUESTING CODE...');
+
+            try {
+                const response = await authFetch('/api/baileys/pairing-code', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ phone })
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.code) {
+                    document.getElementById('pairingCodeDisplay').textContent = data.code;
+                    document.getElementById('pairingCodeResult').classList.remove('hidden');
+                    showToast('PAIRING CODE READY');
+                } else {
+                    showToast(data.error || 'FAILED TO GET CODE', 'error');
+                }
+            } catch (error) {
+                showToast('CONNECTION ERROR', 'error');
+            }
+        }
+
+        // ============ CLIPBOARD ============
+
+        function copyToClipboard(text) {
+            if (!text) return;
+            if (navigator.clipboard?.writeText) {
+                navigator.clipboard.writeText(text).then(
+                    () => showToast('COPIED TO CLIPBOARD'),
+                    () => showToast('COPY FAILED', 'error')
+                );
+            } else {
+                // Fallback for non-secure contexts
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                document.body.appendChild(ta);
+                ta.select();
+                try {
+                    document.execCommand('copy');
+                    showToast('COPIED TO CLIPBOARD');
+                } catch (e) {
+                    showToast('COPY FAILED', 'error');
+                }
+                document.body.removeChild(ta);
+            }
+        }
+
+        // ============ WHATSAPP GROUPS IMPORT ============
+
+        let waGroups = [];
+
+        async function openWaGroupsModal() {
+            const modal = document.getElementById('waGroupsModal');
+            const body = document.getElementById('waGroupsBody');
+            const searchInput = document.getElementById('waGroupSearchInput');
+
+            modal.classList.add('active');
+            if (searchInput) searchInput.value = '';
+            body.innerHTML = '<div class="empty-state"><div class="blink">LOADING GROUPS...</div></div>';
+
+            try {
+                const response = await authFetch('/api/baileys/groups');
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to load groups');
+                }
+
+                waGroups = data.groups || [];
+                renderWaGroups();
+            } catch (error) {
+                body.innerHTML = `<div class="empty-state"><div>${escapeHtml(error.message)}</div><div style="font-size: 10px; opacity: 0.6; margin-top: 8px;">Requires an active Baileys connection</div></div>`;
+            }
+        }
+
+        function closeWaGroupsModal(e) {
+            if (e && e.target !== e.currentTarget) return;
+            document.getElementById('waGroupsModal').classList.remove('active');
+        }
+
+        function renderWaGroups(searchTerm) {
+            const body = document.getElementById('waGroupsBody');
+            const term = (searchTerm !== undefined ? searchTerm : document.getElementById('waGroupSearchInput')?.value || '').toLowerCase().trim();
+
+            let filtered = waGroups;
+            if (term) {
+                filtered = waGroups.filter(g =>
+                    g.subject.toLowerCase().includes(term) ||
+                    g.groupId.includes(term)
+                );
+            }
+
+            if (filtered.length === 0) {
+                body.innerHTML = `<div class="empty-state"><div>${term ? 'NO MATCHING GROUPS' : 'NO GROUPS FOUND'}</div></div>`;
+                return;
+            }
+
+            body.innerHTML = filtered.map(g => {
+                const alreadyAdded = g.alreadyAdded || groups.some(existing => existing.groupId === g.groupId);
+                return `
+                    <div class="wa-group-item">
+                        <div class="wa-group-info">
+                            <div class="wa-group-name">${escapeHtml(g.subject || 'Unnamed Group')}</div>
+                            <div class="wa-group-id copyable" onclick="copyToClipboard('${escapeHtml(g.groupId)}')" title="Click to copy">${escapeHtml(g.groupId)}</div>
+                        </div>
+                        <div class="wa-group-members">${g.participants} members</div>
+                        ${alreadyAdded
+                            ? '<span class="wa-group-added">✓ ADDED</span>'
+                            : `<button class="btn btn-small" onclick="addWaGroup('${escapeHtml(g.groupId)}', this)">ADD</button>`}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function addWaGroup(groupId, btnEl) {
+            const g = waGroups.find(x => x.groupId === groupId);
+            if (!g) return;
+
+            // Group subjects can be any length; the API requires 2-50 chars
+            let name = (g.subject || 'Unnamed Group').trim();
+            if (name.length < 2) name = 'Unnamed Group';
+            if (name.length > 50) name = name.slice(0, 50).trim();
+
+            if (btnEl) { btnEl.disabled = true; btnEl.textContent = '...'; }
+
+            try {
+                const response = await authFetch('/api/groups/add', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ groupId, name, type: 'GENERAL' })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    groups.push(data.group);
+                    g.alreadyAdded = true;
+                    renderWaGroups();
+                    renderGroups();
+                    loadSystemInfo();
+                    showToast('GROUP ADDED');
+                } else if (response.status === 409) {
+                    g.alreadyAdded = true;
+                    renderWaGroups();
+                    showToast('GROUP ALREADY EXISTS', 'error');
+                } else {
+                    throw new Error(data.error || 'Failed to add group');
+                }
+            } catch (error) {
+                showToast('FAILED TO ADD GROUP', 'error');
+                if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'ADD'; }
+            }
+        }
+
+        // ============ ALERTS & MONITORING ============
+
+        async function loadAlertsStatus() {
+            try {
+                const response = await authFetch('/api/alerts/status');
+                if (response.ok) {
+                    renderAlertsStatus(await response.json());
+                }
+            } catch (error) {
+                console.error('Failed to load alerts status:', error);
+            }
+        }
+
+        function renderAlertsStatus(data) {
+            const list = document.getElementById('alertChannelsList');
+            if (!list) return;
+
+            const ch = data.channels || {};
+            const rows = [
+                { name: 'TELEGRAM', on: ch.telegram },
+                { name: 'SLACK', on: ch.slack },
+                { name: 'ALERTS WEBHOOK', on: ch.webhook }
+            ];
+
+            list.innerHTML = rows.map(r => `
+                <div class="event-stat-item">
+                    <span class="event-stat-name">${r.name}</span>
+                    <span class="event-stat-count" style="color: ${r.on ? '#00ff9f' : 'rgba(128,128,128,0.6)'}">${r.on ? '● ON' : '○ NOT SET'}</span>
+                </div>
+            `).join('');
+
+            const countEl = document.getElementById('alertsSentCount');
+            if (countEl && data.stats) {
+                countEl.textContent = `${data.stats.sent || 0} sent / ${data.stats.failed || 0} failed`;
+            }
+
+            // Sync inputs (don't clobber them mid-typing)
+            const input = document.getElementById('alertsWebhookInput');
+            if (input && document.activeElement !== input) {
+                input.value = ch.webhookUrl || '';
+                input.disabled = !!ch.webhookFromEnv;
+            }
+            const tokenInput = document.getElementById('alertsTokenInput');
+            if (tokenInput && document.activeElement !== tokenInput && tokenInput.dataset.dirty !== '1') {
+                tokenInput.value = '';
+                tokenInput.placeholder = ch.webhookHasToken ? '•••••••• (token saved)' : 'paste token...';
+            }
+            const formatSelect = document.getElementById('alertsFormatSelect');
+            if (formatSelect && document.activeElement !== formatSelect) {
+                formatSelect.value = ch.webhookFormat || 'generic';
+            }
+            const envWarning = document.getElementById('alertsWebhookEnvWarning');
+            if (envWarning) {
+                envWarning.classList.toggle('hidden', !ch.webhookFromEnv);
+            }
+        }
+
+        async function saveAlertsWebhook() {
+            const input = document.getElementById('alertsWebhookInput');
+            const tokenInput = document.getElementById('alertsTokenInput');
+            const formatSelect = document.getElementById('alertsFormatSelect');
+            const url = input.value.trim();
+
+            if (url) {
+                try {
+                    new URL(url);
+                } catch {
+                    showToast('INVALID URL FORMAT', 'error');
+                    input.focus();
+                    return;
+                }
+            }
+
+            const body = { url, format: formatSelect?.value || 'generic' };
+            // Only send the token if the user actually typed in the field -
+            // otherwise the saved token is kept as-is
+            if (tokenInput?.dataset.dirty === '1') {
+                body.token = tokenInput.value.trim();
+            }
+
+            try {
+                const response = await authFetch('/api/alerts/webhook', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    showToast(url ? 'ALERTS WEBHOOK SAVED' : 'ALERTS WEBHOOK CLEARED');
+                    if (tokenInput) {
+                        tokenInput.value = '';
+                        delete tokenInput.dataset.dirty;
+                    }
+                    loadAlertsStatus();
+                } else {
+                    showToast(data.error || 'SAVE FAILED', 'error');
+                }
+            } catch (error) {
+                showToast('CONNECTION ERROR', 'error');
+            }
+        }
+
+        async function testAlert() {
+            showToast('SENDING TEST ALERT...');
+            try {
+                const response = await authFetch('/api/test-alert', { method: 'POST' });
+                const data = await response.json();
+
+                if (data.success) {
+                    showToast('TEST ALERT SENT');
+                } else if (data.details === 'no_channels_configured') {
+                    showToast('NO ALERT CHANNELS CONFIGURED', 'error');
+                } else {
+                    showToast(data.error || 'TEST FAILED', 'error');
+                }
+            } catch (error) {
+                showToast('TEST FAILED', 'error');
+            }
+        }
+
+        // Browser notifications when the connection drops while the dashboard is open
+        const BROWSER_ALERTS_KEY = 'filter_browser_alerts';
+        let lastConnStatusForNotify = null;
+
+        function browserAlertsEnabled() {
+            return localStorage.getItem(BROWSER_ALERTS_KEY) === '1' &&
+                'Notification' in window &&
+                Notification.permission === 'granted';
+        }
+
+        async function toggleBrowserAlerts() {
+            if (!('Notification' in window)) {
+                showToast('NOT SUPPORTED IN THIS BROWSER', 'error');
+                return;
+            }
+
+            if (localStorage.getItem(BROWSER_ALERTS_KEY) === '1') {
+                localStorage.removeItem(BROWSER_ALERTS_KEY);
+                updateBrowserAlertsBtn();
+                showToast('BROWSER ALERTS OFF');
+                return;
+            }
+
+            const permission = await Notification.requestPermission();
+            if (permission === 'granted') {
+                localStorage.setItem(BROWSER_ALERTS_KEY, '1');
+                showToast('BROWSER ALERTS ON');
+            } else {
+                showToast('NOTIFICATION PERMISSION DENIED', 'error');
+            }
+            updateBrowserAlertsBtn();
+        }
+
+        function updateBrowserAlertsBtn() {
+            const btn = document.getElementById('browserAlertsBtn');
+            if (btn) {
+                btn.textContent = localStorage.getItem(BROWSER_ALERTS_KEY) === '1'
+                    ? 'BROWSER ALERTS: ON'
+                    : 'BROWSER ALERTS: OFF';
+            }
+        }
+
+        function notifyConnectionChange(status) {
+            if (lastConnStatusForNotify === null) {
+                lastConnStatusForNotify = status;
+                return;
+            }
+            if (status === lastConnStatusForNotify) return;
+
+            const prev = lastConnStatusForNotify;
+            lastConnStatusForNotify = status;
+
+            if (!browserAlertsEnabled()) return;
+
+            if (prev === 'connected' && status !== 'connected') {
+                new Notification('WhatsApp Filter', { body: 'WhatsApp connection LOST', tag: 'wa-conn' });
+            } else if (status === 'connected' && prev !== 'connected') {
+                new Notification('WhatsApp Filter', { body: 'WhatsApp connection restored', tag: 'wa-conn' });
+            }
+        }
+
+        // ============ BACKUP & RESTORE ============
+
+        async function exportConfig() {
+            try {
+                const response = await authFetch('/api/config/export');
+                if (!response.ok) throw new Error('Export failed');
+
+                const blob = await response.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `whatsapp-filter-backup-${new Date().toISOString().slice(0, 10)}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                showToast('CONFIG EXPORTED');
+            } catch (error) {
+                showToast('EXPORT FAILED', 'error');
+            }
+        }
+
+        async function importConfigFile(input) {
+            const file = input.files?.[0];
+            input.value = ''; // allow re-selecting the same file
+            if (!file) return;
+
+            let backup;
+            try {
+                backup = JSON.parse(await file.text());
+            } catch (e) {
+                showToast('INVALID JSON FILE', 'error');
+                return;
+            }
+
+            const replace = document.getElementById('importReplaceMode')?.checked;
+            if (replace && !confirm('Replace ALL existing contacts, groups and type webhooks with the backup contents?')) {
+                return;
+            }
+
+            try {
+                const response = await authFetch('/api/config/import', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ...backup, mode: replace ? 'replace' : 'merge' })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    const r = data.results;
+                    showToast(`IMPORTED: ${r.contacts.added} CONTACTS, ${r.groups.added} GROUPS`);
+                    loadConfig();
+                    loadSystemInfo();
+                } else {
+                    showToast(data.error || 'IMPORT FAILED', 'error');
+                }
+            } catch (error) {
+                showToast('IMPORT FAILED', 'error');
             }
         }
 
@@ -2166,6 +2807,12 @@
                 if (response.ok) {
                     const data = await response.json();
 
+                    // Keep version badge in sync with the server
+                    if (data.version) {
+                        const badge = document.getElementById('versionBadge');
+                        if (badge) badge.textContent = `v${data.version}`;
+                    }
+
                     const hours = Math.floor(data.uptime / 3600);
                     const minutes = Math.floor((data.uptime % 3600) / 60);
                     const seconds = Math.floor(data.uptime % 60);
@@ -2199,6 +2846,9 @@
             // Map Baileys statuses
             if (status === 'waiting_qr') status = 'connecting';
 
+            // Fire browser notification on connected <-> disconnected transitions
+            notifyConnectionChange(status);
+
             banner.className = `connection-banner status-${status}`;
 
             // Show friendly text based on mode
@@ -2229,30 +2879,68 @@
         // Store all events for filtering
         let allEvents = [];
         let currentFilter = 'all';
+        let eventSearchTerm = '';
+
+        // Free-text search across events
+        function searchEvents(term) {
+            eventSearchTerm = (term || '').toLowerCase().trim();
+            renderEvents(filterEventsByAction(allEvents, currentFilter));
+        }
 
         // Load recent events
         async function loadRecentEvents() {
+            const updatedEl = document.getElementById('eventsUpdatedAt');
             try {
                 const response = await authFetch('/api/events/recent?limit=50');
                 if (response.ok) {
                     const data = await response.json();
                     allEvents = data.events || [];
                     renderEvents(filterEventsByAction(allEvents, currentFilter));
+                    if (updatedEl) {
+                        updatedEl.textContent = `updated ${new Date().toLocaleTimeString('en-US', { hour12: false })}`;
+                        updatedEl.style.color = '';
+                    }
+                } else {
+                    // Surface failures instead of silently freezing the feed
+                    if (updatedEl) {
+                        updatedEl.textContent = response.status === 429
+                            ? 'RATE LIMITED - retrying...'
+                            : `UPDATE FAILED (${response.status})`;
+                        updatedEl.style.color = '#ffa500';
+                    }
+                    console.error('Failed to load events: HTTP', response.status);
                 }
             } catch (error) {
+                if (updatedEl) {
+                    updatedEl.textContent = 'UPDATE FAILED';
+                    updatedEl.style.color = '#ff4757';
+                }
                 console.error('Failed to load events:', error);
             }
         }
 
-        // Filter events by action or source type
+        // Filter events by action or source type, then apply free-text search
         function filterEventsByAction(events, filter) {
-            if (filter === 'all') return events;
-            // Source type filters
-            if (filter === 'group' || filter === 'contact') {
-                return events.filter(e => e.sourceType === filter);
+            let result = events;
+
+            if (filter !== 'all') {
+                if (filter === 'group' || filter === 'contact') {
+                    result = result.filter(e => e.sourceType === filter);
+                } else {
+                    result = result.filter(e => e.action === filter);
+                }
             }
-            // Action filters
-            return events.filter(e => e.action === filter);
+
+            if (eventSearchTerm) {
+                result = result.filter(e =>
+                    (e.senderName || '').toLowerCase().includes(eventSearchTerm) ||
+                    (e.source || '').toLowerCase().includes(eventSearchTerm) ||
+                    (e.messagePreview || '').toLowerCase().includes(eventSearchTerm) ||
+                    (e.messageBody || '').toLowerCase().includes(eventSearchTerm)
+                );
+            }
+
+            return result;
         }
 
         // Filter events (called from tabs)
@@ -2428,10 +3116,11 @@
             document.getElementById('eventModal').classList.remove('active');
         }
 
-        // Close modal on Escape key
+        // Close modals on Escape key
         document.addEventListener('keydown', function(e) {
             if (e.key === 'Escape') {
                 closeEventModal();
+                closeWaGroupsModal();
             }
         });
 
@@ -2546,16 +3235,21 @@
 
             list.innerHTML = filtered.map((contact, index) => {
                 const realIndex = contacts.indexOf(contact);
-                const typeClass = `type-${(contact.type || 'personal').toLowerCase()}`;
+                const currentType = contact.type || 'PERSONAL';
+                const typeClass = `type-${currentType.toLowerCase()}`;
+                // Include the contact's type even if it's no longer in the available list
+                const contactTypes = availableTypes.contact.includes(currentType)
+                    ? availableTypes.contact
+                    : [...availableTypes.contact, currentType];
+                const typeOptions = contactTypes.map(t =>
+                    `<option value="${t}" ${currentType === t ? 'selected' : ''}>${t}</option>`
+                ).join('');
                 return `
                     <div class="contact-item">
-                        <div class="contact-number">${escapeHtml(contact.phone)}</div>
+                        <div class="contact-number copyable" onclick="copyToClipboard('${escapeHtml(contact.phone)}')" title="Click to copy">${escapeHtml(contact.phone)}</div>
                         <div class="contact-name">${escapeHtml(contact.name)}</div>
                         <select class="contact-type-select ${typeClass}" onchange="updateContactType(${realIndex}, this.value)" title="Click to change type">
-                            <option value="PERSONAL" ${contact.type === 'PERSONAL' ? 'selected' : ''}>PERSONAL</option>
-                            <option value="BUSINESS" ${contact.type === 'BUSINESS' ? 'selected' : ''}>BUSINESS</option>
-                            <option value="VIP" ${contact.type === 'VIP' ? 'selected' : ''}>VIP</option>
-                            <option value="TEMP" ${contact.type === 'TEMP' ? 'selected' : ''}>TEMP</option>
+                            ${typeOptions}
                         </select>
                         <button class="remove-btn" onclick="removeContact(${realIndex})" title="Remove contact">×</button>
                     </div>
@@ -2704,7 +3398,7 @@
                 ).join('');
                 return `
                     <div class="contact-item group-item">
-                        <div class="contact-number">${escapeHtml(group.groupId)}</div>
+                        <div class="contact-number copyable" onclick="copyToClipboard('${escapeHtml(group.groupId)}')" title="Click to copy">${escapeHtml(group.groupId)}</div>
                         <div class="contact-name">${escapeHtml(group.name)}</div>
                         <select class="contact-type-select ${typeClass}" onchange="updateGroupType(${realIndex}, this.value)" title="Click to change type">
                             ${typeOptions}
@@ -2891,6 +3585,8 @@
             loadEventStats();
             loadBaileysStatus();
             loadTypeWebhooks();
+            loadAlertsStatus();
+            updateBrowserAlertsBtn();
 
             // Auto-refresh data every 5 seconds
             refreshIntervals.push(setInterval(() => {
@@ -2906,6 +3602,7 @@
                 if (getAuthToken()) {
                     loadConfig();
                     loadEventStats();
+                    loadAlertsStatus();
                 }
             }, 30000));
         }
@@ -2918,6 +3615,22 @@
             }
         })();
     </script>
+
+    <!-- WhatsApp Groups Import Modal -->
+    <div class="event-modal-overlay" id="waGroupsModal" onclick="closeWaGroupsModal(event)">
+        <div class="event-modal" onclick="event.stopPropagation()">
+            <div class="event-modal-header">
+                <span>IMPORT GROUPS FROM WHATSAPP</span>
+                <button class="event-modal-close" onclick="closeWaGroupsModal()">&times;</button>
+            </div>
+            <div class="event-modal-body">
+                <input type="text" class="input-field" id="waGroupSearchInput" placeholder="Search groups..." oninput="renderWaGroups(this.value)" style="margin-bottom: 12px; width: 100%;">
+                <div id="waGroupsBody">
+                    <div class="empty-state"><div class="blink">LOADING GROUPS...</div></div>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- Event Detail Modal -->
     <div class="event-modal-overlay" id="eventModal" onclick="closeEventModal(event)">

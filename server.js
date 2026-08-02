@@ -31,7 +31,7 @@ const { isValidPhone, isValidGroupId, isValidContactType, isValidGroupType, isVa
 const app = express();
 app.set('trust proxy', 1); // Trust first proxy (nginx, Cloudflare, etc.)
 const PORT = process.env.PORT || 3000;
-const VERSION = '2.1.0';
+const VERSION = '2.2.0';
 const startedAt = new Date().toISOString();
 const BAILEYS_ENABLED = process.env.BAILEYS_ENABLED === 'true';
 
@@ -135,13 +135,31 @@ function ipWhitelist(req, res, next) {
   next();
 }
 
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 1 * 60 * 1000, // 1 minute
-  max: 100, // 100 requests per minute
+// Rate limiting:
+// - strict on login (brute-force protection)
+// - generous on the admin API (the dashboard polls several endpoints every 5s,
+//   and multiple open tabs previously exhausted the old global 100/min limit,
+//   silently freezing the Recent Events feed with 429s)
+// - NONE on /filter: that's where messages arrive - rate limiting it drops messages
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: { error: 'Too many login attempts, try again later' }
+});
+const apiLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000,
+  max: 600,
   message: { error: 'Too many requests' }
 });
-app.use(limiter);
+app.use('/auth/login', loginLimiter);
+app.use('/api', apiLimiter);
+
+// Admin API responses must never be cached by proxies/CDNs -
+// a cached response makes the dashboard look frozen
+app.use(['/api', '/health', '/auth'], (req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
 
 // Configuration
 let config = {
@@ -178,6 +196,13 @@ async function loadConfig() {
     // Initialize webhook service with the URL and type webhooks
     webhookService.init(webhookUrl);
     webhookService.setTypeWebhooks(config.typeWebhooks);
+
+    // Alerts webhook: env takes precedence over saved config
+    alertService.setWebhookConfig({
+      url: savedConfig.alertsWebhookUrl,
+      token: savedConfig.alertsWebhookToken,
+      format: savedConfig.alertsWebhookFormat
+    });
 
     // Set custom types in validators
     validators.setCustomTypes(config.customContactTypes, config.customGroupTypes);
@@ -233,6 +258,18 @@ async function saveConfig() {
     // Only save webhookUrl if it wasn't set via environment
     if (!process.env.WEBHOOK_URL && config.webhookUrl) {
       configToSave.webhookUrl = config.webhookUrl;
+    }
+
+    // Same for the alerts webhook (persist only fields not locked by env)
+    const alertsWebhook = alertService.getWebhookConfig();
+    if (!process.env.ALERTS_WEBHOOK_URL && alertsWebhook.url) {
+      configToSave.alertsWebhookUrl = alertsWebhook.url;
+    }
+    if (!process.env.ALERTS_WEBHOOK_TOKEN && alertsWebhook.token) {
+      configToSave.alertsWebhookToken = alertsWebhook.token;
+    }
+    if (!process.env.ALERTS_WEBHOOK_FORMAT && alertsWebhook.format !== 'generic') {
+      configToSave.alertsWebhookFormat = alertsWebhook.format;
     }
 
     await fs.writeFile(configPath, JSON.stringify(configToSave, null, 2));
@@ -511,8 +548,8 @@ app.get('/api/status', (req, res) => {
         consecutiveFailures: webhookHealth.consecutiveFailures
       },
       alerts: {
-        url: process.env.ALERTS_WEBHOOK_URL || null,
-        configured: !!process.env.ALERTS_WEBHOOK_URL
+        url: alertService.getWebhookUrl() || null,
+        configured: !!alertService.getWebhookUrl()
       },
       slack: {
         configured: !!process.env.SLACK_WEBHOOK_URL
@@ -641,6 +678,32 @@ app.post('/api/baileys/send', async (req, res) => {
   }
 });
 
+// List WhatsApp groups the connected account participates in (for import picker)
+app.get('/api/baileys/groups', async (req, res) => {
+  if (!BAILEYS_ENABLED) {
+    return res.status(400).json({ error: 'Baileys mode is not enabled' });
+  }
+
+  try {
+    const waGroups = await baileysService.fetchGroups();
+    const authorizedIds = new Set((config.allowedGroups || []).map(g => normalizeGroupId(g.groupId)));
+
+    const groups = waGroups
+      .map(g => ({
+        groupId: normalizeGroupId(g.id),
+        subject: g.subject,
+        participants: g.participants,
+        alreadyAdded: authorizedIds.has(normalizeGroupId(g.id))
+      }))
+      .sort((a, b) => a.subject.localeCompare(b.subject));
+
+    res.json({ groups, total: groups.length });
+  } catch (error) {
+    logger.error('Failed to fetch WhatsApp groups', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Get configuration
 app.get('/api/config', (req, res) => {
   const validators = require('./utils/validators');
@@ -658,6 +721,106 @@ app.get('/api/config', (req, res) => {
       group: validators.getValidGroupTypes()
     }
   });
+});
+
+// Export configuration as a downloadable backup
+app.get('/api/config/export', (req, res) => {
+  const backup = {
+    exportedAt: new Date().toISOString(),
+    version: VERSION,
+    allowedNumbers: config.allowedNumbers || [],
+    allowedGroups: config.allowedGroups || [],
+    typeWebhooks: config.typeWebhooks || {},
+    customContactTypes: config.customContactTypes || [],
+    customGroupTypes: config.customGroupTypes || []
+  };
+
+  const filename = `whatsapp-filter-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.json(backup);
+});
+
+// Import configuration from a backup (merge by default, replace with mode=replace)
+app.post('/api/config/import', async (req, res) => {
+  try {
+    const validators = require('./utils/validators');
+    const { allowedNumbers, allowedGroups, typeWebhooks, customContactTypes, customGroupTypes, mode } = req.body;
+    const replace = mode === 'replace';
+
+    // Apply custom types first so imported entries using them pass validation
+    if (Array.isArray(customContactTypes)) {
+      config.customContactTypes = customContactTypes
+        .filter(t => typeof t === 'string' && t.length >= 2 && t.length <= 20)
+        .map(t => t.toUpperCase());
+    }
+    if (Array.isArray(customGroupTypes)) {
+      config.customGroupTypes = customGroupTypes
+        .filter(t => typeof t === 'string' && t.length >= 2 && t.length <= 20)
+        .map(t => t.toUpperCase());
+    }
+    validators.setCustomTypes(config.customContactTypes || [], config.customGroupTypes || []);
+
+    const results = { contacts: { added: 0, skipped: 0 }, groups: { added: 0, skipped: 0 } };
+
+    if (Array.isArray(allowedNumbers)) {
+      if (replace) config.allowedNumbers = [];
+      for (const c of allowedNumbers) {
+        if (!c || !isValidPhone(c.phone || '') || !isValidName(c.name || '') || !isValidContactType(c.type)) {
+          results.contacts.skipped++;
+          continue;
+        }
+        if (config.allowedNumbers.some(existing => existing.phone === c.phone)) {
+          results.contacts.skipped++;
+          continue;
+        }
+        config.allowedNumbers.push({ phone: c.phone, name: c.name, type: c.type });
+        results.contacts.added++;
+      }
+    }
+
+    if (Array.isArray(allowedGroups)) {
+      if (replace) config.allowedGroups = [];
+      if (!config.allowedGroups) config.allowedGroups = [];
+      for (const g of allowedGroups) {
+        const groupId = normalizeGroupId(g?.groupId || '');
+        if (!g || !isValidGroupId(groupId) || !isValidName(g.name || '') || !isValidGroupType(g.type)) {
+          results.groups.skipped++;
+          continue;
+        }
+        if (config.allowedGroups.some(existing => normalizeGroupId(existing.groupId) === groupId)) {
+          results.groups.skipped++;
+          continue;
+        }
+        config.allowedGroups.push({ groupId, name: g.name, type: g.type });
+        results.groups.added++;
+      }
+    }
+
+    if (typeWebhooks && typeof typeWebhooks === 'object') {
+      const cleaned = replace ? {} : { ...(config.typeWebhooks || {}) };
+      for (const [type, url] of Object.entries(typeWebhooks)) {
+        if (url && typeof url === 'string' && url.trim()) {
+          try {
+            new URL(url);
+            cleaned[type] = url.trim();
+          } catch {
+            // skip invalid URLs
+          }
+        }
+      }
+      config.typeWebhooks = cleaned;
+      webhookService.setTypeWebhooks(cleaned);
+    }
+
+    eventRouter.setConfig(config);
+    await saveConfig();
+
+    logger.info('Configuration imported', { mode: replace ? 'replace' : 'merge', ...results });
+    res.json({ success: true, mode: replace ? 'replace' : 'merge', results });
+  } catch (error) {
+    logger.error('Failed to import config', { error: error.message });
+    res.status(500).json({ error: 'Failed to import configuration' });
+  }
 });
 
 // Update webhook URL
@@ -1140,6 +1303,62 @@ app.post('/api/test-webhook', async (req, res) => {
   }
 });
 
+// Alert channels status (for UI)
+app.get('/api/alerts/status', (req, res) => {
+  const stats = statsService.getStats();
+  res.json({
+    channels: alertService.getChannels(),
+    stats: stats.alerts
+  });
+});
+
+// Update alerts webhook settings (URL, bearer token, payload format)
+app.post('/api/alerts/webhook', async (req, res) => {
+  try {
+    if (process.env.ALERTS_WEBHOOK_URL) {
+      return res.status(403).json({
+        error: 'Alerts webhook is set via environment variable and cannot be changed from UI',
+        source: 'env'
+      });
+    }
+
+    const { url, token, format } = req.body;
+
+    // Validate URL format (allow empty to clear)
+    if (url && typeof url === 'string' && url.trim()) {
+      try {
+        new URL(url);
+      } catch {
+        return res.status(400).json({ error: 'Invalid URL format' });
+      }
+    }
+
+    if (format !== undefined && !['generic', 'aos'].includes(String(format).toLowerCase())) {
+      return res.status(400).json({ error: 'Invalid format. Must be: generic or aos' });
+    }
+
+    // token/format are only updated when provided; url is always applied
+    alertService.setWebhookConfig({
+      url: url?.trim() || '',
+      token: token !== undefined ? String(token) : undefined,
+      format: format !== undefined ? String(format).toLowerCase() : undefined
+    });
+    await saveConfig();
+
+    const saved = alertService.getWebhookConfig();
+    logger.info('Alerts webhook updated', {
+      configured: !!saved.url,
+      format: saved.format,
+      hasToken: !!saved.token
+    });
+
+    res.json({ success: true, configured: !!saved.url, url: saved.url, format: saved.format, hasToken: !!saved.token });
+  } catch (error) {
+    logger.error('Failed to update alerts webhook', { error: error.message });
+    res.status(500).json({ error: 'Failed to update alerts webhook' });
+  }
+});
+
 // Test alerts
 app.post('/api/test-alert', async (req, res) => {
   const result = await alertService.test();
@@ -1153,14 +1372,6 @@ app.post('/api/test-alert', async (req, res) => {
       details: result.reason || result.error
     });
   }
-});
-
-// Webhook URL is read-only
-app.post('/api/webhook', (req, res) => {
-  res.status(400).json({
-    error: 'Webhook URL is configured via WEBHOOK_URL environment variable',
-    current_url: config.webhookUrl
-  });
 });
 
 // ============ MESSAGE STORAGE ENDPOINTS ============
@@ -1207,6 +1418,11 @@ app.delete('/api/messages/:phone', async (req, res) => {
 
 // ============ MEDIA ENDPOINTS ============
 
+// Get media stats (must be registered before /api/media/:id)
+app.get('/api/media/stats', (req, res) => {
+  res.json(mediaStore.getStats());
+});
+
 // Serve media file by ID
 app.get('/api/media/:id', async (req, res) => {
   const media = mediaStore.getMedia(req.params.id);
@@ -1224,11 +1440,6 @@ app.get('/api/media/:id', async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: 'Failed to serve media' });
   }
-});
-
-// Get media stats
-app.get('/api/media/stats', (req, res) => {
-  res.json(mediaStore.getStats());
 });
 
 // 404 handler
@@ -1264,6 +1475,50 @@ async function startServer() {
     baileysEvents.start().catch(err => {
       logger.error('Failed to auto-start Baileys', { error: err.message });
     });
+
+    // Connection watchdog: safety net on top of Baileys' own retry logic.
+    // Forces a reconnect if the connection is down with nothing scheduled,
+    // and alerts once when the connection has been down for a prolonged period.
+    const PROLONGED_DISCONNECT_MS = (parseInt(process.env.PROLONGED_DISCONNECT_MINUTES) || 10) * 60 * 1000;
+    let downSince = null;
+    let prolongedAlertSent = false;
+
+    setInterval(() => {
+      const status = baileysService.getStatus().status;
+
+      if (status === 'connected') {
+        downSince = null;
+        prolongedAlertSent = false;
+        return;
+      }
+
+      if (downSince === null) downSince = Date.now();
+
+      // Reconnect if nothing is scheduled (waiting_qr/connecting need no push)
+      if ((status === 'disconnected' || status === 'error') && !baileysService.hasPendingReconnect()) {
+        logger.warn('Watchdog: connection down with no reconnect scheduled, forcing reconnect');
+        baileysEvents.start().catch(err => {
+          logger.error('Watchdog reconnect failed', { error: err.message });
+        });
+      }
+
+      if (!prolongedAlertSent && Date.now() - downSince > PROLONGED_DISCONNECT_MS) {
+        prolongedAlertSent = true;
+        const downMinutes = Math.round((Date.now() - downSince) / 60000);
+        alertService.send({
+          level: alertService.ALERT_LEVELS.CRITICAL,
+          event: 'prolonged_disconnect',
+          title: `WhatsApp Down for ${downMinutes}+ Minutes`,
+          message: status === 'waiting_qr'
+            ? 'WhatsApp is waiting for a QR scan - manual action is required to reconnect.'
+            : 'The WhatsApp connection has been down for an extended period despite automatic reconnect attempts.',
+          details: {
+            status,
+            downSince: new Date(downSince).toISOString()
+          }
+        }).catch(() => {});
+      }
+    }, 60 * 1000);
   }
 
   app.listen(PORT, '0.0.0.0', () => {
@@ -1304,6 +1559,28 @@ async function startServer() {
     }
   });
 }
+
+// Crash safety: log everything, alert on fatal errors, never die silently
+process.on('unhandledRejection', (reason) => {
+  logger.error('Unhandled promise rejection', {
+    error: reason?.message || String(reason),
+    stack: reason?.stack
+  });
+});
+
+process.on('uncaughtException', (error) => {
+  logger.error('Uncaught exception, shutting down', { error: error.message, stack: error.stack });
+  alertService.send({
+    level: alertService.ALERT_LEVELS.CRITICAL,
+    event: 'server_crash',
+    title: 'Server Crashed',
+    message: `Uncaught exception: ${error.message}. Process will exit (container should restart it).`,
+    details: { error: error.message }
+  }).catch(() => {}).finally(() => {
+    // Give the alert a moment to go out, then exit so the container restarts clean
+    setTimeout(() => process.exit(1), 2000);
+  });
+});
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {
