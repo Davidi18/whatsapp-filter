@@ -406,6 +406,27 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Lean connection status for external dashboards (e.g. Agency-OS connection dot).
+// No auth so a browser widget can poll it directly; CORS is already open.
+app.get('/health/connection', (req, res) => {
+  const state = connectionService.getState();
+  const baileysStatus = BAILEYS_ENABLED ? baileysService.getStatus() : null;
+  const status = baileysStatus ? baileysStatus.status : state.status;
+
+  res.json({
+    connected: status === 'connected',
+    status,
+    reconnecting: baileysStatus
+      ? !!(baileysStatus.reconnectScheduled || baileysStatus.slowRetryMode)
+      : status === 'connecting',
+    phoneNumber: (baileysStatus && baileysStatus.phoneNumber) || state.phoneNumber,
+    since: state.statusSince,
+    instance: state.instance,
+    source: BAILEYS_ENABLED ? 'baileys' : 'evolution',
+    timestamp: new Date().toISOString()
+  });
+});
+
 // API Documentation
 app.get('/docs', (req, res) => {
   res.json({
@@ -416,6 +437,10 @@ app.get('/docs', (req, res) => {
     endpoints: {
       'GET /health': {
         description: 'System health check with connection status',
+        auth_required: false
+      },
+      'GET /health/connection': {
+        description: 'Lean connection status for external dashboards (connected, status, since)',
         auth_required: false
       },
       'GET /api/status': {
