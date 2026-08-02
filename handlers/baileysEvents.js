@@ -82,6 +82,19 @@ function initialize() {
           willReconnect: update.willReconnect
         }
       });
+    } else if (update.enteredSlowRetry) {
+      // Fast reconnect attempts exhausted - connection is down and only
+      // retrying every few minutes now. The user should know about this.
+      await alertService.send({
+        level: alertService.ALERT_LEVELS.CRITICAL,
+        event: 'baileys_reconnect_failing',
+        title: 'WhatsApp Reconnection Failing',
+        message: `Lost the WhatsApp connection and fast reconnect attempts failed (reason: ${update.reason || 'unknown'}). Now retrying every few minutes - check the server and QR status.`,
+        details: {
+          reason: update.reason,
+          status: 'slow_retry'
+        }
+      });
     } else if (update.status === 'connected') {
       // Auto-allow the connected phone number
       if (update.phoneNumber) {

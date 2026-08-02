@@ -1551,6 +1551,30 @@
                 </div>
             </div>
 
+            <!-- Alerts & Monitoring -->
+            <div class="section collapsed">
+                <div class="section-header section-toggle" onclick="toggleSection(this)">
+                    <span><span class="toggle-icon">▼</span> ALERTS &amp; MONITORING</span>
+                    <span id="alertsSentCount" style="font-size: 10px; opacity: 0.7;"></span>
+                </div>
+                <div class="section-content">
+                    <div style="background: rgba(0,255,159,0.05); border: 1px solid rgba(0,255,159,0.2); border-radius: 4px; padding: 10px; margin-bottom: 15px; font-size: 11px; opacity: 0.8; line-height: 1.6;">
+                        Get notified when WhatsApp disconnects, reconnection fails, or webhook delivery breaks.
+                        Server channels are configured via environment variables:
+                        <span style="font-family: monospace;">TELEGRAM_BOT_TOKEN</span> + <span style="font-family: monospace;">TELEGRAM_CHAT_ID</span>,
+                        <span style="font-family: monospace;">SLACK_WEBHOOK_URL</span>,
+                        <span style="font-family: monospace;">ALERTS_WEBHOOK_URL</span>.
+                    </div>
+                    <div class="event-stats-grid" id="alertChannelsList">
+                        <!-- Populated by JS -->
+                    </div>
+                    <div style="margin-top: 15px; display: flex; gap: 10px; flex-wrap: wrap;">
+                        <button class="btn" onclick="testAlert()">TEST ALERT</button>
+                        <button class="btn" id="browserAlertsBtn" onclick="toggleBrowserAlerts()">BROWSER ALERTS: OFF</button>
+                    </div>
+                </div>
+            </div>
+
             <div class="section">
                 <div class="section-header">+ ADD NEW CONTACT</div>
                 <div class="section-content">
@@ -2189,6 +2213,122 @@
             }
         }
 
+        // ============ ALERTS & MONITORING ============
+
+        async function loadAlertsStatus() {
+            try {
+                const response = await authFetch('/api/alerts/status');
+                if (response.ok) {
+                    renderAlertsStatus(await response.json());
+                }
+            } catch (error) {
+                console.error('Failed to load alerts status:', error);
+            }
+        }
+
+        function renderAlertsStatus(data) {
+            const list = document.getElementById('alertChannelsList');
+            if (!list) return;
+
+            const ch = data.channels || {};
+            const rows = [
+                { name: 'TELEGRAM', on: ch.telegram },
+                { name: 'SLACK', on: ch.slack },
+                { name: 'ALERTS WEBHOOK', on: ch.webhook }
+            ];
+
+            list.innerHTML = rows.map(r => `
+                <div class="event-stat-item">
+                    <span class="event-stat-name">${r.name}</span>
+                    <span class="event-stat-count" style="color: ${r.on ? '#00ff9f' : 'rgba(128,128,128,0.6)'}">${r.on ? '● ON' : '○ NOT SET'}</span>
+                </div>
+            `).join('');
+
+            const countEl = document.getElementById('alertsSentCount');
+            if (countEl && data.stats) {
+                countEl.textContent = `${data.stats.sent || 0} sent / ${data.stats.failed || 0} failed`;
+            }
+        }
+
+        async function testAlert() {
+            showToast('SENDING TEST ALERT...');
+            try {
+                const response = await authFetch('/api/test-alert', { method: 'POST' });
+                const data = await response.json();
+
+                if (data.success) {
+                    showToast('TEST ALERT SENT');
+                } else if (data.details === 'no_channels_configured') {
+                    showToast('NO ALERT CHANNELS CONFIGURED', 'error');
+                } else {
+                    showToast(data.error || 'TEST FAILED', 'error');
+                }
+            } catch (error) {
+                showToast('TEST FAILED', 'error');
+            }
+        }
+
+        // Browser notifications when the connection drops while the dashboard is open
+        const BROWSER_ALERTS_KEY = 'filter_browser_alerts';
+        let lastConnStatusForNotify = null;
+
+        function browserAlertsEnabled() {
+            return localStorage.getItem(BROWSER_ALERTS_KEY) === '1' &&
+                'Notification' in window &&
+                Notification.permission === 'granted';
+        }
+
+        async function toggleBrowserAlerts() {
+            if (!('Notification' in window)) {
+                showToast('NOT SUPPORTED IN THIS BROWSER', 'error');
+                return;
+            }
+
+            if (localStorage.getItem(BROWSER_ALERTS_KEY) === '1') {
+                localStorage.removeItem(BROWSER_ALERTS_KEY);
+                updateBrowserAlertsBtn();
+                showToast('BROWSER ALERTS OFF');
+                return;
+            }
+
+            const permission = await Notification.requestPermission();
+            if (permission === 'granted') {
+                localStorage.setItem(BROWSER_ALERTS_KEY, '1');
+                showToast('BROWSER ALERTS ON');
+            } else {
+                showToast('NOTIFICATION PERMISSION DENIED', 'error');
+            }
+            updateBrowserAlertsBtn();
+        }
+
+        function updateBrowserAlertsBtn() {
+            const btn = document.getElementById('browserAlertsBtn');
+            if (btn) {
+                btn.textContent = localStorage.getItem(BROWSER_ALERTS_KEY) === '1'
+                    ? 'BROWSER ALERTS: ON'
+                    : 'BROWSER ALERTS: OFF';
+            }
+        }
+
+        function notifyConnectionChange(status) {
+            if (lastConnStatusForNotify === null) {
+                lastConnStatusForNotify = status;
+                return;
+            }
+            if (status === lastConnStatusForNotify) return;
+
+            const prev = lastConnStatusForNotify;
+            lastConnStatusForNotify = status;
+
+            if (!browserAlertsEnabled()) return;
+
+            if (prev === 'connected' && status !== 'connected') {
+                new Notification('WhatsApp Filter', { body: 'WhatsApp connection LOST', tag: 'wa-conn' });
+            } else if (status === 'connected' && prev !== 'connected') {
+                new Notification('WhatsApp Filter', { body: 'WhatsApp connection restored', tag: 'wa-conn' });
+            }
+        }
+
         // ============ BACKUP & RESTORE ============
 
         async function exportConfig() {
@@ -2596,6 +2736,9 @@
 
             // Map Baileys statuses
             if (status === 'waiting_qr') status = 'connecting';
+
+            // Fire browser notification on connected <-> disconnected transitions
+            notifyConnectionChange(status);
 
             banner.className = `connection-banner status-${status}`;
 
@@ -3315,6 +3458,8 @@
             loadEventStats();
             loadBaileysStatus();
             loadTypeWebhooks();
+            loadAlertsStatus();
+            updateBrowserAlertsBtn();
 
             // Auto-refresh data every 5 seconds
             refreshIntervals.push(setInterval(() => {
@@ -3330,6 +3475,7 @@
                 if (getAuthToken()) {
                     loadConfig();
                     loadEventStats();
+                    loadAlertsStatus();
                 }
             }, 30000));
         }

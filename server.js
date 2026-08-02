@@ -1266,6 +1266,15 @@ app.post('/api/test-webhook', async (req, res) => {
   }
 });
 
+// Alert channels status (for UI)
+app.get('/api/alerts/status', (req, res) => {
+  const stats = statsService.getStats();
+  res.json({
+    channels: alertService.getChannels(),
+    stats: stats.alerts
+  });
+});
+
 // Test alerts
 app.post('/api/test-alert', async (req, res) => {
   const result = await alertService.test();
@@ -1382,6 +1391,50 @@ async function startServer() {
     baileysEvents.start().catch(err => {
       logger.error('Failed to auto-start Baileys', { error: err.message });
     });
+
+    // Connection watchdog: safety net on top of Baileys' own retry logic.
+    // Forces a reconnect if the connection is down with nothing scheduled,
+    // and alerts once when the connection has been down for a prolonged period.
+    const PROLONGED_DISCONNECT_MS = (parseInt(process.env.PROLONGED_DISCONNECT_MINUTES) || 10) * 60 * 1000;
+    let downSince = null;
+    let prolongedAlertSent = false;
+
+    setInterval(() => {
+      const status = baileysService.getStatus().status;
+
+      if (status === 'connected') {
+        downSince = null;
+        prolongedAlertSent = false;
+        return;
+      }
+
+      if (downSince === null) downSince = Date.now();
+
+      // Reconnect if nothing is scheduled (waiting_qr/connecting need no push)
+      if ((status === 'disconnected' || status === 'error') && !baileysService.hasPendingReconnect()) {
+        logger.warn('Watchdog: connection down with no reconnect scheduled, forcing reconnect');
+        baileysEvents.start().catch(err => {
+          logger.error('Watchdog reconnect failed', { error: err.message });
+        });
+      }
+
+      if (!prolongedAlertSent && Date.now() - downSince > PROLONGED_DISCONNECT_MS) {
+        prolongedAlertSent = true;
+        const downMinutes = Math.round((Date.now() - downSince) / 60000);
+        alertService.send({
+          level: alertService.ALERT_LEVELS.CRITICAL,
+          event: 'prolonged_disconnect',
+          title: `WhatsApp Down for ${downMinutes}+ Minutes`,
+          message: status === 'waiting_qr'
+            ? 'WhatsApp is waiting for a QR scan - manual action is required to reconnect.'
+            : 'The WhatsApp connection has been down for an extended period despite automatic reconnect attempts.',
+          details: {
+            status,
+            downSince: new Date(downSince).toISOString()
+          }
+        }).catch(() => {});
+      }
+    }, 60 * 1000);
   }
 
   app.listen(PORT, '0.0.0.0', () => {
@@ -1422,6 +1475,28 @@ async function startServer() {
     }
   });
 }
+
+// Crash safety: log everything, alert on fatal errors, never die silently
+process.on('unhandledRejection', (reason) => {
+  logger.error('Unhandled promise rejection', {
+    error: reason?.message || String(reason),
+    stack: reason?.stack
+  });
+});
+
+process.on('uncaughtException', (error) => {
+  logger.error('Uncaught exception, shutting down', { error: error.message, stack: error.stack });
+  alertService.send({
+    level: alertService.ALERT_LEVELS.CRITICAL,
+    event: 'server_crash',
+    title: 'Server Crashed',
+    message: `Uncaught exception: ${error.message}. Process will exit (container should restart it).`,
+    details: { error: error.message }
+  }).catch(() => {}).finally(() => {
+    // Give the alert a moment to go out, then exit so the container restarts clean
+    setTimeout(() => process.exit(1), 2000);
+  });
+});
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {

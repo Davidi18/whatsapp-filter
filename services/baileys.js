@@ -33,6 +33,30 @@ let retryCount = 0;
 const MAX_RETRIES = 5;
 const AUTH_DIR = path.join(__dirname, '..', 'config', 'baileys_auth');
 
+// After fast retries are exhausted, keep trying at a slow interval instead of giving up
+const SLOW_RETRY_INTERVAL = parseInt(process.env.BAILEYS_SLOW_RETRY_MS) || 5 * 60 * 1000;
+let slowRetryMode = false;
+let reconnectTimer = null;
+
+/**
+ * Schedule a reconnect attempt, replacing any pending one.
+ * A single timer prevents overlapping connect() chains from creating duplicate sockets.
+ */
+function scheduleReconnect(delay) {
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connect();
+  }, delay);
+}
+
+/**
+ * Whether a reconnect attempt is already scheduled
+ */
+function hasPendingReconnect() {
+  return !!reconnectTimer;
+}
+
 // Event callbacks
 let onMessageCallback = null;
 let onConnectionChangeCallback = null;
@@ -45,6 +69,12 @@ const baileysLogger = pino({ level: 'silent' });
  */
 async function connect() {
   try {
+    // Cancel any pending reconnect - this call supersedes it
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+
     // Load persistent LID→Phone mappings
     await lidStore.load();
 
@@ -141,7 +171,7 @@ async function connect() {
             // Try reconnecting once before giving up
             retryCount++;
             logger.info('Logged out (attempt 1), retrying once before clearing auth', { retryCount });
-            setTimeout(() => connect(), 2000);
+            scheduleReconnect(2000);
             if (onConnectionChangeCallback) {
               onConnectionChangeCallback({ status: 'disconnected', reason, willReconnect: true });
             }
@@ -163,34 +193,49 @@ async function connect() {
         if (statusCode === DisconnectReason.badSession || statusCode === DisconnectReason.restartRequired) {
           logger.info('Session refresh, reconnecting immediately (keeping auth)', { reason });
           retryCount = 0; // don't burn retries on normal session refreshes
-          setTimeout(() => connect(), 1000);
+          scheduleReconnect(1000);
           if (onConnectionChangeCallback) {
             onConnectionChangeCallback({ status: 'disconnected', reason, willReconnect: true });
           }
           return;
         }
 
-        // All other reasons: reconnect with backoff, up to MAX_RETRIES
-        const shouldReconnect = true;
+        // All other reasons: reconnect with backoff up to MAX_RETRIES,
+        // then NEVER give up - fall back to slow retries so the connection
+        // always recovers eventually without manual intervention
+        let enteredSlowRetry = false;
         if (retryCount < MAX_RETRIES) {
           retryCount++;
           const delay = Math.min(1000 * Math.pow(2, retryCount - 1), 30000); // 1s, 2s, 4s, 8s, 16s
           logger.info('Reconnecting...', { attempt: retryCount, delay });
-          setTimeout(() => connect(), delay);
+          scheduleReconnect(delay);
         } else {
-          logger.error('Max retries reached, giving up', { maxRetries: MAX_RETRIES });
+          enteredSlowRetry = !slowRetryMode;
+          slowRetryMode = true;
+          logger.error('Max fast retries reached, switching to slow retry mode', {
+            maxRetries: MAX_RETRIES,
+            slowRetryIntervalMs: SLOW_RETRY_INTERVAL
+          });
+          scheduleReconnect(SLOW_RETRY_INTERVAL);
         }
 
         if (onConnectionChangeCallback) {
           onConnectionChangeCallback({
             status: 'disconnected',
             reason,
-            willReconnect: retryCount < MAX_RETRIES
+            willReconnect: true,
+            slowRetryMode,
+            enteredSlowRetry
           });
         }
       } else if (connection === 'open') {
         connectionStatus = 'connected';
         retryCount = 0;
+        slowRetryMode = false;
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer);
+          reconnectTimer = null;
+        }
         qrCodeData = null;
         qrCodeBase64 = null;
 
@@ -694,6 +739,14 @@ async function fetchGroups() {
  * Disconnect from WhatsApp
  */
 async function disconnect() {
+  // Intentional disconnect - cancel any scheduled auto-reconnect
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  slowRetryMode = false;
+  retryCount = 0;
+
   if (socket) {
     try {
       await socket.logout();
@@ -730,7 +783,9 @@ function getStatus() {
     status: connectionStatus,
     phoneNumber,
     hasQRCode: !!qrCodeBase64,
-    retryCount
+    retryCount,
+    slowRetryMode,
+    reconnectScheduled: !!reconnectTimer
   };
 }
 
@@ -804,6 +859,7 @@ module.exports = {
   sendMessage,
   sendMedia,
   fetchGroups,
+  hasPendingReconnect,
   getStatus,
   getQRCode,
   requestPairingCode,
