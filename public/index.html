@@ -1571,44 +1571,55 @@
                     <div class="event-stats-grid" id="alertChannelsList">
                         <!-- Populated by JS -->
                     </div>
-                    <div id="alertsWebhookEnvWarning" class="hidden" style="background: rgba(255,165,0,0.1); border: 1px solid rgba(255,165,0,0.3); border-radius: 4px; padding: 10px; margin-top: 15px; font-size: 11px; color: #ffa500;">
-                        Alerts webhook URL is set via environment variable and cannot be changed from UI
-                    </div>
-                    <div class="add-form form-webhook" style="margin-top: 15px;">
-                        <div class="input-group">
-                            <div class="input-label">ALERTS WEBHOOK URL (your interface)</div>
-                            <input
-                                type="url"
-                                class="input-field"
-                                placeholder="https://agency-os.online/api/notifications"
-                                id="alertsWebhookInput"
-                            >
+                    <!-- Read-only view when the webhook is managed via environment variables -->
+                    <div id="alertsWebhookEnvView" class="hidden" style="margin-top: 15px;">
+                        <div style="background: rgba(0,255,159,0.05); border: 1px solid rgba(0,255,159,0.2); border-radius: 4px; padding: 12px; font-size: 11px; line-height: 1.8;">
+                            <div style="opacity: 0.7;">ALERTS WEBHOOK — managed via environment variables (<span style="font-family: monospace;">ALERTS_WEBHOOK_URL / _TOKEN / _FORMAT</span>)</div>
+                            <div style="font-family: monospace; word-break: break-all;" id="alertsWebhookEnvUrl"></div>
+                            <div style="opacity: 0.8;">FORMAT: <span id="alertsWebhookEnvFormat"></span> &nbsp;·&nbsp; TOKEN: <span id="alertsWebhookEnvToken"></span></div>
                         </div>
-                        <div class="input-group no-label">
-                            <button class="btn" onclick="saveAlertsWebhook()">SAVE</button>
-                        </div>
-                        <div class="input-group no-label">
+                        <div style="margin-top: 10px;">
                             <button class="btn" onclick="testAlert()">TEST</button>
                         </div>
                     </div>
-                    <div class="add-form" style="margin-top: 12px; grid-template-columns: 1fr auto;">
-                        <div class="input-group">
-                            <div class="input-label">BEARER TOKEN (Authorization header)</div>
-                            <input
-                                type="password"
-                                class="input-field"
-                                placeholder="paste token..."
-                                id="alertsTokenInput"
-                                oninput="this.dataset.dirty='1'"
-                                autocomplete="off"
-                            >
+                    <!-- Editable form when the webhook is configured from the UI -->
+                    <div id="alertsWebhookForm">
+                        <div class="add-form form-webhook" style="margin-top: 15px;">
+                            <div class="input-group">
+                                <div class="input-label">ALERTS WEBHOOK URL (your interface)</div>
+                                <input
+                                    type="url"
+                                    class="input-field"
+                                    placeholder="https://agency-os.online/api/notifications"
+                                    id="alertsWebhookInput"
+                                >
+                            </div>
+                            <div class="input-group no-label">
+                                <button class="btn" onclick="saveAlertsWebhook()">SAVE</button>
+                            </div>
+                            <div class="input-group no-label">
+                                <button class="btn" onclick="testAlert()">TEST</button>
+                            </div>
                         </div>
-                        <div class="input-group">
-                            <div class="input-label">PAYLOAD FORMAT</div>
-                            <select class="input-field" id="alertsFormatSelect" style="min-width: 160px;">
-                                <option value="generic">GENERIC JSON</option>
-                                <option value="aos">AOS NOTIFICATION</option>
-                            </select>
+                        <div class="add-form" style="margin-top: 12px; grid-template-columns: 1fr auto;">
+                            <div class="input-group">
+                                <div class="input-label">BEARER TOKEN (Authorization header)</div>
+                                <input
+                                    type="password"
+                                    class="input-field"
+                                    placeholder="paste token..."
+                                    id="alertsTokenInput"
+                                    oninput="this.dataset.dirty='1'"
+                                    autocomplete="off"
+                                >
+                            </div>
+                            <div class="input-group">
+                                <div class="input-label">PAYLOAD FORMAT</div>
+                                <select class="input-field" id="alertsFormatSelect" style="min-width: 160px;">
+                                    <option value="generic">GENERIC JSON</option>
+                                    <option value="aos">AOS NOTIFICATION</option>
+                                </select>
+                            </div>
                         </div>
                     </div>
                     <div style="margin-top: 15px; display: flex; gap: 10px; flex-wrap: wrap;">
@@ -2291,11 +2302,24 @@
                 countEl.textContent = `${data.stats.sent || 0} sent / ${data.stats.failed || 0} failed`;
             }
 
+            // Env-managed: show read-only summary instead of the edit form
+            const fromEnv = !!ch.webhookFromEnv;
+            const form = document.getElementById('alertsWebhookForm');
+            const envView = document.getElementById('alertsWebhookEnvView');
+            if (form) form.classList.toggle('hidden', fromEnv);
+            if (envView) envView.classList.toggle('hidden', !fromEnv);
+
+            if (fromEnv) {
+                document.getElementById('alertsWebhookEnvUrl').textContent = ch.webhookUrl || '';
+                document.getElementById('alertsWebhookEnvFormat').textContent = (ch.webhookFormat || 'generic').toUpperCase();
+                document.getElementById('alertsWebhookEnvToken').textContent = ch.webhookHasToken ? 'SET' : 'NOT SET';
+                return;
+            }
+
             // Sync inputs (don't clobber them mid-typing)
             const input = document.getElementById('alertsWebhookInput');
             if (input && document.activeElement !== input) {
                 input.value = ch.webhookUrl || '';
-                input.disabled = !!ch.webhookFromEnv;
             }
             const tokenInput = document.getElementById('alertsTokenInput');
             if (tokenInput && document.activeElement !== tokenInput && tokenInput.dataset.dirty !== '1') {
@@ -2305,10 +2329,6 @@
             const formatSelect = document.getElementById('alertsFormatSelect');
             if (formatSelect && document.activeElement !== formatSelect) {
                 formatSelect.value = ch.webhookFormat || 'generic';
-            }
-            const envWarning = document.getElementById('alertsWebhookEnvWarning');
-            if (envWarning) {
-                envWarning.classList.toggle('hidden', !ch.webhookFromEnv);
             }
         }
 
