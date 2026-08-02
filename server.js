@@ -198,9 +198,11 @@ async function loadConfig() {
     webhookService.setTypeWebhooks(config.typeWebhooks);
 
     // Alerts webhook: env takes precedence over saved config
-    if (savedConfig.alertsWebhookUrl) {
-      alertService.setWebhookUrl(savedConfig.alertsWebhookUrl);
-    }
+    alertService.setWebhookConfig({
+      url: savedConfig.alertsWebhookUrl,
+      token: savedConfig.alertsWebhookToken,
+      format: savedConfig.alertsWebhookFormat
+    });
 
     // Set custom types in validators
     validators.setCustomTypes(config.customContactTypes, config.customGroupTypes);
@@ -258,9 +260,16 @@ async function saveConfig() {
       configToSave.webhookUrl = config.webhookUrl;
     }
 
-    // Same for the alerts webhook
-    if (!process.env.ALERTS_WEBHOOK_URL && alertService.getWebhookUrl()) {
-      configToSave.alertsWebhookUrl = alertService.getWebhookUrl();
+    // Same for the alerts webhook (persist only fields not locked by env)
+    const alertsWebhook = alertService.getWebhookConfig();
+    if (!process.env.ALERTS_WEBHOOK_URL && alertsWebhook.url) {
+      configToSave.alertsWebhookUrl = alertsWebhook.url;
+    }
+    if (!process.env.ALERTS_WEBHOOK_TOKEN && alertsWebhook.token) {
+      configToSave.alertsWebhookToken = alertsWebhook.token;
+    }
+    if (!process.env.ALERTS_WEBHOOK_FORMAT && alertsWebhook.format !== 'generic') {
+      configToSave.alertsWebhookFormat = alertsWebhook.format;
     }
 
     await fs.writeFile(configPath, JSON.stringify(configToSave, null, 2));
@@ -1303,7 +1312,7 @@ app.get('/api/alerts/status', (req, res) => {
   });
 });
 
-// Update alerts webhook URL (where disconnect/failure alerts are sent)
+// Update alerts webhook settings (URL, bearer token, payload format)
 app.post('/api/alerts/webhook', async (req, res) => {
   try {
     if (process.env.ALERTS_WEBHOOK_URL) {
@@ -1313,7 +1322,7 @@ app.post('/api/alerts/webhook', async (req, res) => {
       });
     }
 
-    const { url } = req.body;
+    const { url, token, format } = req.body;
 
     // Validate URL format (allow empty to clear)
     if (url && typeof url === 'string' && url.trim()) {
@@ -1324,16 +1333,29 @@ app.post('/api/alerts/webhook', async (req, res) => {
       }
     }
 
-    const alertsUrl = url?.trim() || '';
-    alertService.setWebhookUrl(alertsUrl);
+    if (format !== undefined && !['generic', 'aos'].includes(String(format).toLowerCase())) {
+      return res.status(400).json({ error: 'Invalid format. Must be: generic or aos' });
+    }
+
+    // token/format are only updated when provided; url is always applied
+    alertService.setWebhookConfig({
+      url: url?.trim() || '',
+      token: token !== undefined ? String(token) : undefined,
+      format: format !== undefined ? String(format).toLowerCase() : undefined
+    });
     await saveConfig();
 
-    logger.info('Alerts webhook URL updated', { configured: !!alertsUrl });
+    const saved = alertService.getWebhookConfig();
+    logger.info('Alerts webhook updated', {
+      configured: !!saved.url,
+      format: saved.format,
+      hasToken: !!saved.token
+    });
 
-    res.json({ success: true, configured: !!alertsUrl, url: alertsUrl });
+    res.json({ success: true, configured: !!saved.url, url: saved.url, format: saved.format, hasToken: !!saved.token });
   } catch (error) {
-    logger.error('Failed to update alerts webhook URL', { error: error.message });
-    res.status(500).json({ error: 'Failed to update alerts webhook URL' });
+    logger.error('Failed to update alerts webhook', { error: error.message });
+    res.status(500).json({ error: 'Failed to update alerts webhook' });
   }
 });
 

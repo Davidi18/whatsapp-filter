@@ -34,19 +34,44 @@ const TELEGRAM_ICONS = {
 const ALERT_COOLDOWN_MS = parseInt(process.env.ALERT_COOLDOWN_MS) || 5 * 60 * 1000;
 const lastSentAt = new Map();
 
-// Alerts webhook URL - env takes precedence, otherwise configurable at runtime (from UI)
+// Alerts webhook settings - env takes precedence, otherwise configurable at runtime (from UI)
+// Formats: 'generic' (raw alert JSON) or 'aos' (Agency-OS /api/notifications shape)
+const WEBHOOK_FORMATS = ['generic', 'aos'];
 let alertsWebhookUrl = process.env.ALERTS_WEBHOOK_URL || '';
+let alertsWebhookToken = process.env.ALERTS_WEBHOOK_TOKEN || '';
+let alertsWebhookFormat = WEBHOOK_FORMATS.includes((process.env.ALERTS_WEBHOOK_FORMAT || '').toLowerCase())
+  ? process.env.ALERTS_WEBHOOK_FORMAT.toLowerCase()
+  : 'generic';
 
 /**
- * Set the alerts webhook URL at runtime (ignored when env var is set)
+ * Update alerts webhook settings at runtime.
+ * Fields locked by env vars are ignored; undefined fields are left unchanged.
  */
-function setWebhookUrl(url) {
-  if (process.env.ALERTS_WEBHOOK_URL) return;
-  alertsWebhookUrl = (url || '').trim();
+function setWebhookConfig({ url, token, format } = {}) {
+  if (url !== undefined && !process.env.ALERTS_WEBHOOK_URL) {
+    alertsWebhookUrl = (url || '').trim();
+  }
+  if (token !== undefined && !process.env.ALERTS_WEBHOOK_TOKEN) {
+    alertsWebhookToken = (token || '').trim();
+  }
+  if (format !== undefined && !process.env.ALERTS_WEBHOOK_FORMAT) {
+    const f = (format || 'generic').toLowerCase();
+    if (WEBHOOK_FORMATS.includes(f)) {
+      alertsWebhookFormat = f;
+    }
+  }
 }
 
 function getWebhookUrl() {
   return alertsWebhookUrl;
+}
+
+function getWebhookConfig() {
+  return {
+    url: alertsWebhookUrl,
+    token: alertsWebhookToken,
+    format: alertsWebhookFormat
+  };
 }
 
 /**
@@ -127,20 +152,56 @@ async function sendToWebhook(payload) {
   const url = alertsWebhookUrl;
   if (!url) return;
 
+  const headers = {
+    'Content-Type': 'application/json',
+    'X-Alert-Source': 'whatsapp-filter',
+    'X-Alert-Level': payload.level
+  };
+  if (alertsWebhookToken) {
+    headers['Authorization'] = `Bearer ${alertsWebhookToken}`;
+  }
+
+  const body = alertsWebhookFormat === 'aos' ? formatAosNotification(payload) : payload;
+
   try {
-    await axios.post(url, payload, {
-      timeout: 5000,
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Alert-Source': 'whatsapp-filter',
-        'X-Alert-Level': payload.level
-      }
-    });
-    logger.debug('Alert sent to webhook', { event: payload.event });
+    await axios.post(url, body, { timeout: 5000, headers });
+    logger.debug('Alert sent to webhook', { event: payload.event, format: alertsWebhookFormat });
   } catch (error) {
-    logger.error('Failed to send alert to webhook', { error: error.message });
+    logger.error('Failed to send alert to webhook', {
+      error: error.response ? `HTTP ${error.response.status}: ${JSON.stringify(error.response.data).slice(0, 200)}` : error.message,
+      format: alertsWebhookFormat
+    });
     throw error;
   }
+}
+
+/**
+ * Format alert for Agency-OS POST /api/notifications.
+ * Only `title` is required; accepted types: info, report, communication, task, payment.
+ */
+function formatAosNotification(payload) {
+  const bodyLines = [payload.message];
+  if (payload.details?.reason) bodyLines.push(`Reason: ${payload.details.reason}`);
+  if (payload.details?.phoneNumber) bodyLines.push(`Phone: ${payload.details.phoneNumber}`);
+  if (payload.details?.status) bodyLines.push(`Status: ${payload.details.status}`);
+  if (payload.details?.consecutiveFailures) bodyLines.push(`Consecutive failures: ${payload.details.consecutiveFailures}`);
+
+  const levelPrefix = payload.level === 'critical'
+    ? `${TELEGRAM_ICONS.critical} `
+    : payload.level === 'warning' ? `${TELEGRAM_ICONS.warning} ` : '';
+
+  return {
+    title: `${levelPrefix}${payload.title}`,
+    body: bodyLines.filter(Boolean).join('\n'),
+    type: 'info',
+    source: process.env.INSTANCE_NAME || 'whatsapp-filter',
+    payload: {
+      url: '/notifications',
+      event: payload.event,
+      level: payload.level,
+      alertId: payload.id
+    }
+  };
 }
 
 /**
@@ -333,6 +394,8 @@ function getChannels() {
     webhook: !!alertsWebhookUrl,
     webhookUrl: alertsWebhookUrl,
     webhookFromEnv: !!process.env.ALERTS_WEBHOOK_URL,
+    webhookFormat: alertsWebhookFormat,
+    webhookHasToken: !!alertsWebhookToken,
     cooldownMs: ALERT_COOLDOWN_MS
   };
 }
@@ -342,6 +405,7 @@ module.exports = {
   send,
   test,
   getChannels,
-  setWebhookUrl,
+  setWebhookConfig,
+  getWebhookConfig,
   getWebhookUrl
 };

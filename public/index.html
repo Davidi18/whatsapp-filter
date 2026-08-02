@@ -1580,7 +1580,7 @@
                             <input
                                 type="url"
                                 class="input-field"
-                                placeholder="https://your-interface.example.com/webhook/alerts"
+                                placeholder="https://agency-os.online/api/notifications"
                                 id="alertsWebhookInput"
                             >
                         </div>
@@ -1589,6 +1589,26 @@
                         </div>
                         <div class="input-group no-label">
                             <button class="btn" onclick="testAlert()">TEST</button>
+                        </div>
+                    </div>
+                    <div class="add-form" style="margin-top: 12px; grid-template-columns: 1fr auto;">
+                        <div class="input-group">
+                            <div class="input-label">BEARER TOKEN (Authorization header)</div>
+                            <input
+                                type="password"
+                                class="input-field"
+                                placeholder="paste token..."
+                                id="alertsTokenInput"
+                                oninput="this.dataset.dirty='1'"
+                                autocomplete="off"
+                            >
+                        </div>
+                        <div class="input-group">
+                            <div class="input-label">PAYLOAD FORMAT</div>
+                            <select class="input-field" id="alertsFormatSelect" style="min-width: 160px;">
+                                <option value="generic">GENERIC JSON</option>
+                                <option value="aos">AOS NOTIFICATION</option>
+                            </select>
                         </div>
                     </div>
                     <div style="margin-top: 15px; display: flex; gap: 10px; flex-wrap: wrap;">
@@ -2271,11 +2291,20 @@
                 countEl.textContent = `${data.stats.sent || 0} sent / ${data.stats.failed || 0} failed`;
             }
 
-            // Sync the webhook URL input (don't clobber it mid-typing)
+            // Sync inputs (don't clobber them mid-typing)
             const input = document.getElementById('alertsWebhookInput');
             if (input && document.activeElement !== input) {
                 input.value = ch.webhookUrl || '';
                 input.disabled = !!ch.webhookFromEnv;
+            }
+            const tokenInput = document.getElementById('alertsTokenInput');
+            if (tokenInput && document.activeElement !== tokenInput && tokenInput.dataset.dirty !== '1') {
+                tokenInput.value = '';
+                tokenInput.placeholder = ch.webhookHasToken ? '•••••••• (token saved)' : 'paste token...';
+            }
+            const formatSelect = document.getElementById('alertsFormatSelect');
+            if (formatSelect && document.activeElement !== formatSelect) {
+                formatSelect.value = ch.webhookFormat || 'generic';
             }
             const envWarning = document.getElementById('alertsWebhookEnvWarning');
             if (envWarning) {
@@ -2285,6 +2314,8 @@
 
         async function saveAlertsWebhook() {
             const input = document.getElementById('alertsWebhookInput');
+            const tokenInput = document.getElementById('alertsTokenInput');
+            const formatSelect = document.getElementById('alertsFormatSelect');
             const url = input.value.trim();
 
             if (url) {
@@ -2297,17 +2328,28 @@
                 }
             }
 
+            const body = { url, format: formatSelect?.value || 'generic' };
+            // Only send the token if the user actually typed in the field -
+            // otherwise the saved token is kept as-is
+            if (tokenInput?.dataset.dirty === '1') {
+                body.token = tokenInput.value.trim();
+            }
+
             try {
                 const response = await authFetch('/api/alerts/webhook', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ url })
+                    body: JSON.stringify(body)
                 });
 
                 const data = await response.json();
 
                 if (response.ok) {
                     showToast(url ? 'ALERTS WEBHOOK SAVED' : 'ALERTS WEBHOOK CLEARED');
+                    if (tokenInput) {
+                        tokenInput.value = '';
+                        delete tokenInput.dataset.dirty;
+                    }
                     loadAlertsStatus();
                 } else {
                     showToast(data.error || 'SAVE FAILED', 'error');
