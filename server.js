@@ -135,13 +135,31 @@ function ipWhitelist(req, res, next) {
   next();
 }
 
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 1 * 60 * 1000, // 1 minute
-  max: 100, // 100 requests per minute
+// Rate limiting:
+// - strict on login (brute-force protection)
+// - generous on the admin API (the dashboard polls several endpoints every 5s,
+//   and multiple open tabs previously exhausted the old global 100/min limit,
+//   silently freezing the Recent Events feed with 429s)
+// - NONE on /filter: that's where messages arrive - rate limiting it drops messages
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: { error: 'Too many login attempts, try again later' }
+});
+const apiLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000,
+  max: 600,
   message: { error: 'Too many requests' }
 });
-app.use(limiter);
+app.use('/auth/login', loginLimiter);
+app.use('/api', apiLimiter);
+
+// Admin API responses must never be cached by proxies/CDNs -
+// a cached response makes the dashboard look frozen
+app.use(['/api', '/health', '/auth'], (req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
 
 // Configuration
 let config = {
@@ -178,6 +196,11 @@ async function loadConfig() {
     // Initialize webhook service with the URL and type webhooks
     webhookService.init(webhookUrl);
     webhookService.setTypeWebhooks(config.typeWebhooks);
+
+    // Alerts webhook: env takes precedence over saved config
+    if (savedConfig.alertsWebhookUrl) {
+      alertService.setWebhookUrl(savedConfig.alertsWebhookUrl);
+    }
 
     // Set custom types in validators
     validators.setCustomTypes(config.customContactTypes, config.customGroupTypes);
@@ -233,6 +256,11 @@ async function saveConfig() {
     // Only save webhookUrl if it wasn't set via environment
     if (!process.env.WEBHOOK_URL && config.webhookUrl) {
       configToSave.webhookUrl = config.webhookUrl;
+    }
+
+    // Same for the alerts webhook
+    if (!process.env.ALERTS_WEBHOOK_URL && alertService.getWebhookUrl()) {
+      configToSave.alertsWebhookUrl = alertService.getWebhookUrl();
     }
 
     await fs.writeFile(configPath, JSON.stringify(configToSave, null, 2));
@@ -511,8 +539,8 @@ app.get('/api/status', (req, res) => {
         consecutiveFailures: webhookHealth.consecutiveFailures
       },
       alerts: {
-        url: process.env.ALERTS_WEBHOOK_URL || null,
-        configured: !!process.env.ALERTS_WEBHOOK_URL
+        url: alertService.getWebhookUrl() || null,
+        configured: !!alertService.getWebhookUrl()
       },
       slack: {
         configured: !!process.env.SLACK_WEBHOOK_URL
@@ -1273,6 +1301,40 @@ app.get('/api/alerts/status', (req, res) => {
     channels: alertService.getChannels(),
     stats: stats.alerts
   });
+});
+
+// Update alerts webhook URL (where disconnect/failure alerts are sent)
+app.post('/api/alerts/webhook', async (req, res) => {
+  try {
+    if (process.env.ALERTS_WEBHOOK_URL) {
+      return res.status(403).json({
+        error: 'Alerts webhook is set via environment variable and cannot be changed from UI',
+        source: 'env'
+      });
+    }
+
+    const { url } = req.body;
+
+    // Validate URL format (allow empty to clear)
+    if (url && typeof url === 'string' && url.trim()) {
+      try {
+        new URL(url);
+      } catch {
+        return res.status(400).json({ error: 'Invalid URL format' });
+      }
+    }
+
+    const alertsUrl = url?.trim() || '';
+    alertService.setWebhookUrl(alertsUrl);
+    await saveConfig();
+
+    logger.info('Alerts webhook URL updated', { configured: !!alertsUrl });
+
+    res.json({ success: true, configured: !!alertsUrl, url: alertsUrl });
+  } catch (error) {
+    logger.error('Failed to update alerts webhook URL', { error: error.message });
+    res.status(500).json({ error: 'Failed to update alerts webhook URL' });
+  }
 });
 
 // Test alerts

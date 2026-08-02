@@ -1469,7 +1469,10 @@
             <div class="section">
                 <div class="section-header section-toggle" onclick="toggleSection(this)">
                     <span><span class="toggle-icon">▼</span> RECENT EVENTS</span>
-                    <button class="btn btn-small" onclick="event.stopPropagation(); refreshEvents()">REFRESH</button>
+                    <span style="display: flex; align-items: center; gap: 10px;">
+                        <span id="eventsUpdatedAt" style="font-size: 9px; opacity: 0.6; font-family: monospace; text-transform: none;"></span>
+                        <button class="btn btn-small" onclick="event.stopPropagation(); refreshEvents()">REFRESH</button>
+                    </span>
                 </div>
                 <div class="section-content">
                     <input type="text" class="input-field" id="eventSearchInput" placeholder="Search events by sender or message..." oninput="searchEvents(this.value)" style="margin-bottom: 12px; width: 100%;">
@@ -1568,8 +1571,27 @@
                     <div class="event-stats-grid" id="alertChannelsList">
                         <!-- Populated by JS -->
                     </div>
+                    <div id="alertsWebhookEnvWarning" class="hidden" style="background: rgba(255,165,0,0.1); border: 1px solid rgba(255,165,0,0.3); border-radius: 4px; padding: 10px; margin-top: 15px; font-size: 11px; color: #ffa500;">
+                        Alerts webhook URL is set via environment variable and cannot be changed from UI
+                    </div>
+                    <div class="add-form form-webhook" style="margin-top: 15px;">
+                        <div class="input-group">
+                            <div class="input-label">ALERTS WEBHOOK URL (your interface)</div>
+                            <input
+                                type="url"
+                                class="input-field"
+                                placeholder="https://your-interface.example.com/webhook/alerts"
+                                id="alertsWebhookInput"
+                            >
+                        </div>
+                        <div class="input-group no-label">
+                            <button class="btn" onclick="saveAlertsWebhook()">SAVE</button>
+                        </div>
+                        <div class="input-group no-label">
+                            <button class="btn" onclick="testAlert()">TEST</button>
+                        </div>
+                    </div>
                     <div style="margin-top: 15px; display: flex; gap: 10px; flex-wrap: wrap;">
-                        <button class="btn" onclick="testAlert()">TEST ALERT</button>
                         <button class="btn" id="browserAlertsBtn" onclick="toggleBrowserAlerts()">BROWSER ALERTS: OFF</button>
                     </div>
                 </div>
@@ -2248,6 +2270,51 @@
             if (countEl && data.stats) {
                 countEl.textContent = `${data.stats.sent || 0} sent / ${data.stats.failed || 0} failed`;
             }
+
+            // Sync the webhook URL input (don't clobber it mid-typing)
+            const input = document.getElementById('alertsWebhookInput');
+            if (input && document.activeElement !== input) {
+                input.value = ch.webhookUrl || '';
+                input.disabled = !!ch.webhookFromEnv;
+            }
+            const envWarning = document.getElementById('alertsWebhookEnvWarning');
+            if (envWarning) {
+                envWarning.classList.toggle('hidden', !ch.webhookFromEnv);
+            }
+        }
+
+        async function saveAlertsWebhook() {
+            const input = document.getElementById('alertsWebhookInput');
+            const url = input.value.trim();
+
+            if (url) {
+                try {
+                    new URL(url);
+                } catch {
+                    showToast('INVALID URL FORMAT', 'error');
+                    input.focus();
+                    return;
+                }
+            }
+
+            try {
+                const response = await authFetch('/api/alerts/webhook', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    showToast(url ? 'ALERTS WEBHOOK SAVED' : 'ALERTS WEBHOOK CLEARED');
+                    loadAlertsStatus();
+                } else {
+                    showToast(data.error || 'SAVE FAILED', 'error');
+                }
+            } catch (error) {
+                showToast('CONNECTION ERROR', 'error');
+            }
         }
 
         async function testAlert() {
@@ -2780,14 +2847,32 @@
 
         // Load recent events
         async function loadRecentEvents() {
+            const updatedEl = document.getElementById('eventsUpdatedAt');
             try {
                 const response = await authFetch('/api/events/recent?limit=50');
                 if (response.ok) {
                     const data = await response.json();
                     allEvents = data.events || [];
                     renderEvents(filterEventsByAction(allEvents, currentFilter));
+                    if (updatedEl) {
+                        updatedEl.textContent = `updated ${new Date().toLocaleTimeString('en-US', { hour12: false })}`;
+                        updatedEl.style.color = '';
+                    }
+                } else {
+                    // Surface failures instead of silently freezing the feed
+                    if (updatedEl) {
+                        updatedEl.textContent = response.status === 429
+                            ? 'RATE LIMITED - retrying...'
+                            : `UPDATE FAILED (${response.status})`;
+                        updatedEl.style.color = '#ffa500';
+                    }
+                    console.error('Failed to load events: HTTP', response.status);
                 }
             } catch (error) {
+                if (updatedEl) {
+                    updatedEl.textContent = 'UPDATE FAILED';
+                    updatedEl.style.color = '#ff4757';
+                }
                 console.error('Failed to load events:', error);
             }
         }

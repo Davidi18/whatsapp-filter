@@ -34,6 +34,21 @@ const TELEGRAM_ICONS = {
 const ALERT_COOLDOWN_MS = parseInt(process.env.ALERT_COOLDOWN_MS) || 5 * 60 * 1000;
 const lastSentAt = new Map();
 
+// Alerts webhook URL - env takes precedence, otherwise configurable at runtime (from UI)
+let alertsWebhookUrl = process.env.ALERTS_WEBHOOK_URL || '';
+
+/**
+ * Set the alerts webhook URL at runtime (ignored when env var is set)
+ */
+function setWebhookUrl(url) {
+  if (process.env.ALERTS_WEBHOOK_URL) return;
+  alertsWebhookUrl = (url || '').trim();
+}
+
+function getWebhookUrl() {
+  return alertsWebhookUrl;
+}
+
 /**
  * Send alert to all configured channels
  */
@@ -76,7 +91,7 @@ async function send(alert) {
   const promises = [];
 
   // Send to alerts webhook
-  if (process.env.ALERTS_WEBHOOK_URL) {
+  if (alertsWebhookUrl) {
     promises.push(sendToWebhook(alertPayload));
   }
 
@@ -109,7 +124,7 @@ async function send(alert) {
  * Send alert to webhook endpoint
  */
 async function sendToWebhook(payload) {
-  const url = process.env.ALERTS_WEBHOOK_URL;
+  const url = alertsWebhookUrl;
   if (!url) return;
 
   try {
@@ -315,7 +330,9 @@ function getChannels() {
   return {
     telegram: !!(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID),
     slack: !!process.env.SLACK_WEBHOOK_URL,
-    webhook: !!process.env.ALERTS_WEBHOOK_URL,
+    webhook: !!alertsWebhookUrl,
+    webhookUrl: alertsWebhookUrl,
+    webhookFromEnv: !!process.env.ALERTS_WEBHOOK_URL,
     cooldownMs: ALERT_COOLDOWN_MS
   };
 }
@@ -324,5 +341,7 @@ module.exports = {
   ALERT_LEVELS,
   send,
   test,
-  getChannels
+  getChannels,
+  setWebhookUrl,
+  getWebhookUrl
 };
