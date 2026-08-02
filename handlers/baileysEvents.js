@@ -20,6 +20,13 @@ function initialize() {
 
   logger.info('Initializing Baileys event handlers');
 
+  // WhatsApp routinely closes the socket (session refresh ~every 50min,
+  // restartRequired, stream errors) and Baileys silently reconnects within
+  // seconds. Only alert "Connected" when the user actually saw an outage:
+  // the first connection after startup, or after a disconnect alert was sent.
+  let sentFirstConnectedAlert = false;
+  let outageAlertSent = false;
+
   // Handle incoming messages from Baileys
   baileysService.onMessage(async (payload) => {
     try {
@@ -72,6 +79,7 @@ function initialize() {
 
     // Send alerts for important status changes
     if (update.status === 'disconnected' && !update.willReconnect) {
+      outageAlertSent = true;
       await alertService.send({
         level: alertService.ALERT_LEVELS.CRITICAL,
         event: 'baileys_disconnected',
@@ -85,6 +93,7 @@ function initialize() {
     } else if (update.enteredSlowRetry) {
       // Fast reconnect attempts exhausted - connection is down and only
       // retrying every few minutes now. The user should know about this.
+      outageAlertSent = true;
       await alertService.send({
         level: alertService.ALERT_LEVELS.CRITICAL,
         event: 'baileys_reconnect_failing',
@@ -100,15 +109,26 @@ function initialize() {
       if (update.phoneNumber) {
         eventRouter.setConnectedPhone(update.phoneNumber);
       }
-      await alertService.send({
-        level: alertService.ALERT_LEVELS.INFO,
-        event: 'baileys_connected',
-        title: 'WhatsApp Connected',
-        message: `Connected to WhatsApp as ${update.phoneNumber || 'unknown'}`,
-        details: {
+
+      // Routine reconnects (session refresh, transient drops) should be
+      // silent - the user was never told anything was wrong.
+      if (!sentFirstConnectedAlert || outageAlertSent) {
+        sentFirstConnectedAlert = true;
+        outageAlertSent = false;
+        await alertService.send({
+          level: alertService.ALERT_LEVELS.INFO,
+          event: 'baileys_connected',
+          title: 'WhatsApp Connected',
+          message: `Connected to WhatsApp as ${update.phoneNumber || 'unknown'}`,
+          details: {
+            phoneNumber: update.phoneNumber
+          }
+        });
+      } else {
+        logger.info('Baileys reconnected (routine, no alert)', {
           phoneNumber: update.phoneNumber
-        }
-      });
+        });
+      }
     }
   });
 
