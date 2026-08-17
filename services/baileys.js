@@ -33,10 +33,44 @@ let retryCount = 0;
 const MAX_RETRIES = 5;
 const AUTH_DIR = path.join(__dirname, '..', 'config', 'baileys_auth');
 
+// Every connect() bumps this. Events from an older socket are ignored so a
+// superseded socket can't schedule reconnects or overwrite the shared state.
+let socketGeneration = 0;
+
+// In-flight connect() promise. Two callers (retry timer + watchdog + API) must
+// never build two sockets at once - that is what caused the reconnect storms.
+let connectInFlight = null;
+
+// Set by disconnect(); keeps the watchdog from undoing a deliberate stop
+let manualDisconnect = false;
+
 // After fast retries are exhausted, keep trying at a slow interval instead of giving up
 const SLOW_RETRY_INTERVAL = parseInt(process.env.BAILEYS_SLOW_RETRY_MS) || 5 * 60 * 1000;
 let slowRetryMode = false;
 let reconnectTimer = null;
+let nextAttemptAt = 0;
+
+// WhatsApp rejected the client outright: 405 (undocumented "connection
+// failure" - stale registration or too many reconnects from this IP) and 403
+// (forbidden). Fast retries make it worse, so back off hard and escalate to a
+// "re-pair needed" state instead of hammering the endpoint.
+const REJECTED_CODES = new Set([403, 405]);
+const REJECT_BACKOFF_MS = parseInt(process.env.BAILEYS_REJECT_BACKOFF_MS) || 5 * 60 * 1000;
+const REJECT_BACKOFF_MAX_MS = parseInt(process.env.BAILEYS_REJECT_BACKOFF_MAX_MS) || 60 * 60 * 1000;
+const REJECTS_BEFORE_REPAIR = parseInt(process.env.BAILEYS_REJECTS_BEFORE_REPAIR) || 3;
+let rejectedCount = 0;
+let requiresRepair = false;
+let lastDisconnectCode = null;
+
+// Consecutive loggedOut (401) closes. Tracked apart from retryCount so an
+// unrelated failure streak can never trigger an auth wipe.
+let loggedOutCount = 0;
+
+// Cache the protocol version - a reconnect loop shouldn't hit web.whatsapp.com
+// on every single attempt
+const VERSION_CACHE_MS = 6 * 60 * 60 * 1000;
+let cachedVersion = null;
+let cachedVersionAt = 0;
 
 /**
  * Schedule a reconnect attempt, replacing any pending one.
@@ -44,17 +78,68 @@ let reconnectTimer = null;
  */
 function scheduleReconnect(delay) {
   if (reconnectTimer) clearTimeout(reconnectTimer);
+  nextAttemptAt = Date.now() + delay;
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
-    connect();
+    connect().catch(err => logger.error('Scheduled reconnect failed', { error: err.message }));
   }, delay);
 }
 
 /**
- * Whether a reconnect attempt is already scheduled
+ * Cancel a pending reconnect and clear the cool-down window
+ */
+function cancelReconnect() {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  nextAttemptAt = 0;
+}
+
+/**
+ * Whether another attempt is already coming: a timer is armed, a connect is
+ * running, or we are inside a back-off window. The watchdog checks this before
+ * forcing a reconnect, so it can no longer stampede on top of our own schedule.
  */
 function hasPendingReconnect() {
-  return !!reconnectTimer;
+  return !!reconnectTimer || !!connectInFlight || Date.now() < nextAttemptAt;
+}
+
+/**
+ * Close and unwire a socket so it stops emitting into our handlers.
+ * Without this, a replaced socket keeps its listeners and every close it emits
+ * schedules another reconnect - the source of the duplicate-connect storm.
+ */
+function tearDownSocket(sock = socket) {
+  if (!sock) return;
+  try {
+    sock.ev.removeAllListeners('connection.update');
+    sock.ev.removeAllListeners('creds.update');
+    sock.ev.removeAllListeners('messages.upsert');
+    sock.ev.removeAllListeners('messages.update');
+    sock.ev.removeAllListeners('contacts.upsert');
+  } catch (err) {
+    logger.debug('Failed to remove socket listeners', { error: err.message });
+  }
+  try {
+    sock.end(undefined);
+  } catch (err) {
+    logger.debug('Failed to end socket', { error: err.message });
+  }
+  if (sock === socket) socket = null;
+}
+
+/**
+ * Latest protocol version, cached between attempts
+ */
+async function getVersion() {
+  if (cachedVersion && Date.now() - cachedVersionAt < VERSION_CACHE_MS) {
+    return cachedVersion;
+  }
+  const { version } = await fetchLatestBaileysVersion();
+  cachedVersion = version;
+  cachedVersionAt = Date.now();
+  return version;
 }
 
 // Event callbacks
@@ -65,15 +150,31 @@ let onConnectionChangeCallback = null;
 const baileysLogger = pino({ level: 'silent' });
 
 /**
- * Initialize and connect to WhatsApp
+ * Initialize and connect to WhatsApp.
+ * Concurrent callers share a single attempt - creating two sockets at once
+ * leaves an orphan whose events fight with the live one.
  */
-async function connect() {
+function connect() {
+  if (connectInFlight) {
+    logger.debug('Connect already in progress, joining in-flight attempt');
+    return connectInFlight;
+  }
+  connectInFlight = doConnect().finally(() => {
+    connectInFlight = null;
+  });
+  return connectInFlight;
+}
+
+async function doConnect() {
+  const generation = ++socketGeneration;
+
   try {
     // Cancel any pending reconnect - this call supersedes it
-    if (reconnectTimer) {
-      clearTimeout(reconnectTimer);
-      reconnectTimer = null;
-    }
+    cancelReconnect();
+    manualDisconnect = false;
+
+    // Drop the previous socket before building a new one
+    tearDownSocket();
 
     // Load persistent LID→Phone mappings
     await lidStore.load();
@@ -84,9 +185,9 @@ async function connect() {
     // Get auth state
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
 
-    // Get latest Baileys version
-    const { version } = await fetchLatestBaileysVersion();
-    logger.info('Baileys connecting', { version: version.join('.') });
+    // Get latest Baileys version (cached across attempts)
+    const version = await getVersion();
+    logger.info('Baileys connecting', { version: version.join('.'), attempt: retryCount });
 
     // Try to create in-memory store (optional - for LID resolution)
     try {
@@ -120,6 +221,10 @@ async function connect() {
       }
     });
 
+    // Keep a local handle: `socket` may already point at a newer socket by the
+    // time this one's handlers run
+    const mySocket = socket;
+
     // Bind store to socket events (if store exists)
     if (store) {
       store.bind(socket.ev);
@@ -127,6 +232,17 @@ async function connect() {
 
     // Handle connection updates
     socket.ev.on('connection.update', async (update) => {
+      // A newer connect() has taken over - this socket is a leftover and must
+      // not touch shared state or schedule reconnects
+      if (generation !== socketGeneration) {
+        logger.debug('Ignoring update from superseded socket', {
+          generation,
+          current: socketGeneration,
+          connection: update.connection
+        });
+        return;
+      }
+
       const { connection, lastDisconnect, qr } = update;
 
       // Handle QR code
@@ -159,18 +275,23 @@ async function connect() {
 
         logger.warn('Baileys connection closed', { statusCode, reason });
         connectionStatus = 'disconnected';
+        lastDisconnectCode = statusCode || null;
         qrCodeData = null;
         qrCodeBase64 = null;
+
+        // This socket is done - unwire it so it can't emit again
+        tearDownSocket(mySocket);
 
         // loggedOut (401) = either user removed device OR stale session after restart
         // Strategy: on first loggedOut, try reconnecting once (handles restart race condition)
         // Only clear auth + request QR if we get loggedOut twice in a row
         if (statusCode === DisconnectReason.loggedOut) {
-          if (retryCount === 0) {
+          loggedOutCount++;
+          if (loggedOutCount === 1) {
             // First loggedOut - might be a stale-session false alarm after restart
-            // Try reconnecting once before giving up
-            retryCount++;
-            logger.info('Logged out (attempt 1), retrying once before clearing auth', { retryCount });
+            // Try reconnecting once before giving up. Counted separately from
+            // retryCount so unrelated failures can't trigger an auth wipe.
+            logger.info('Logged out (attempt 1), retrying once before clearing auth', { loggedOutCount });
             scheduleReconnect(2000);
             if (onConnectionChangeCallback) {
               onConnectionChangeCallback({ status: 'disconnected', reason, willReconnect: true });
@@ -180,6 +301,11 @@ async function connect() {
             logger.info('Logged out (confirmed), clearing auth state');
             await clearAuthState();
             retryCount = 0;
+            loggedOutCount = 0;
+            rejectedCount = 0;
+            requiresRepair = false;
+            slowRetryMode = false;
+            cancelReconnect();
             if (onConnectionChangeCallback) {
               onConnectionChangeCallback({ status: 'disconnected', reason, willReconnect: false });
             }
@@ -200,6 +326,47 @@ async function connect() {
           return;
         }
 
+        // 405 / 403 = WhatsApp refused the handshake itself. Fast retries never
+        // succeed here and the flood is often what keeps the refusal alive, so
+        // back off in growing steps and escalate to "re-pair needed".
+        if (REJECTED_CODES.has(statusCode)) {
+          rejectedCount++;
+          const delay = Math.min(
+            REJECT_BACKOFF_MS * Math.pow(2, rejectedCount - 1),
+            REJECT_BACKOFF_MAX_MS
+          );
+          const enteredSlowRetry = !slowRetryMode;
+          slowRetryMode = true;
+          retryCount = MAX_RETRIES; // fast retries are pointless for this class
+          const repairJustDetected = !requiresRepair && rejectedCount >= REJECTS_BEFORE_REPAIR;
+          if (repairJustDetected) requiresRepair = true;
+
+          logger.warn('WhatsApp refused the connection, backing off', {
+            statusCode,
+            consecutiveRejections: rejectedCount,
+            nextAttemptInMs: delay,
+            requiresRepair
+          });
+          scheduleReconnect(delay);
+
+          if (onConnectionChangeCallback) {
+            onConnectionChangeCallback({
+              status: 'disconnected',
+              reason,
+              statusCode,
+              willReconnect: true,
+              slowRetryMode,
+              enteredSlowRetry,
+              rejected: true,
+              consecutiveRejections: rejectedCount,
+              nextAttemptInMs: delay,
+              requiresRepair,
+              repairJustDetected
+            });
+          }
+          return;
+        }
+
         // All other reasons: reconnect with backoff up to MAX_RETRIES,
         // then NEVER give up - fall back to slow retries so the connection
         // always recovers eventually without manual intervention
@@ -212,10 +379,20 @@ async function connect() {
         } else {
           enteredSlowRetry = !slowRetryMode;
           slowRetryMode = true;
-          logger.error('Max fast retries reached, switching to slow retry mode', {
-            maxRetries: MAX_RETRIES,
-            slowRetryIntervalMs: SLOW_RETRY_INTERVAL
-          });
+          // Log the switch once - re-logging it on every later close is what
+          // filled the logs with "max fast retries reached"
+          if (enteredSlowRetry) {
+            logger.error('Max fast retries reached, switching to slow retry mode', {
+              maxRetries: MAX_RETRIES,
+              slowRetryIntervalMs: SLOW_RETRY_INTERVAL
+            });
+          } else {
+            logger.warn('Still disconnected, next slow retry scheduled', {
+              reason,
+              statusCode,
+              nextAttemptInMs: SLOW_RETRY_INTERVAL
+            });
+          }
           scheduleReconnect(SLOW_RETRY_INTERVAL);
         }
 
@@ -223,6 +400,7 @@ async function connect() {
           onConnectionChangeCallback({
             status: 'disconnected',
             reason,
+            statusCode,
             willReconnect: true,
             slowRetryMode,
             enteredSlowRetry
@@ -231,11 +409,12 @@ async function connect() {
       } else if (connection === 'open') {
         connectionStatus = 'connected';
         retryCount = 0;
+        loggedOutCount = 0;
         slowRetryMode = false;
-        if (reconnectTimer) {
-          clearTimeout(reconnectTimer);
-          reconnectTimer = null;
-        }
+        rejectedCount = 0;
+        requiresRepair = false;
+        lastDisconnectCode = null;
+        cancelReconnect();
         qrCodeData = null;
         qrCodeBase64 = null;
 
@@ -305,6 +484,16 @@ async function connect() {
   } catch (error) {
     logger.error('Failed to connect Baileys', { error: error.message });
     connectionStatus = 'error';
+
+    // We cleared the pending timer on the way in and no socket exists to emit a
+    // close, so re-arm here - otherwise the only thing left is the watchdog.
+    if (generation === socketGeneration && !manualDisconnect) {
+      const delay = slowRetryMode || retryCount >= MAX_RETRIES
+        ? SLOW_RETRY_INTERVAL
+        : Math.min(1000 * Math.pow(2, retryCount++), 30000);
+      logger.info('Re-arming reconnect after failed connect attempt', { delay });
+      scheduleReconnect(delay);
+    }
     return false;
   }
 }
@@ -736,16 +925,35 @@ async function fetchGroups() {
 }
 
 /**
- * Disconnect from WhatsApp
+ * Close the WhatsApp connection but KEEP the paired session.
+ * Reconnecting later reuses the existing creds - no QR scan needed.
  */
 async function disconnect() {
-  // Intentional disconnect - cancel any scheduled auto-reconnect
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer);
-    reconnectTimer = null;
-  }
+  // Intentional disconnect - cancel any scheduled auto-reconnect and make sure
+  // the watchdog doesn't immediately bring it back up
+  cancelReconnect();
+  manualDisconnect = true;
   slowRetryMode = false;
   retryCount = 0;
+  loggedOutCount = 0;
+  rejectedCount = 0;
+
+  socketGeneration++; // invalidate any close event still in flight
+  tearDownSocket();
+
+  connectionStatus = 'disconnected';
+  qrCodeData = null;
+  qrCodeBase64 = null;
+  phoneNumber = null;
+}
+
+/**
+ * Unlink this device on WhatsApp's side, then close the socket.
+ * Destructive: the session is gone and a new QR/pairing code is required.
+ */
+async function logout() {
+  cancelReconnect();
+  manualDisconnect = true;
 
   if (socket) {
     try {
@@ -753,8 +961,17 @@ async function disconnect() {
     } catch (error) {
       logger.warn('Error during logout', { error: error.message });
     }
-    socket = null;
   }
+
+  slowRetryMode = false;
+  retryCount = 0;
+  loggedOutCount = 0;
+  rejectedCount = 0;
+  requiresRepair = false;
+
+  socketGeneration++;
+  tearDownSocket();
+
   connectionStatus = 'disconnected';
   qrCodeData = null;
   qrCodeBase64 = null;
@@ -785,7 +1002,12 @@ function getStatus() {
     hasQRCode: !!qrCodeBase64,
     retryCount,
     slowRetryMode,
-    reconnectScheduled: !!reconnectTimer
+    reconnectScheduled: hasPendingReconnect(),
+    nextAttemptAt: nextAttemptAt ? new Date(nextAttemptAt).toISOString() : null,
+    lastDisconnectCode,
+    consecutiveRejections: rejectedCount,
+    requiresRepair,
+    manualDisconnect
   };
 }
 
@@ -856,6 +1078,7 @@ async function requestPairingCode(phone) {
 module.exports = {
   connect,
   disconnect,
+  logout,
   sendMessage,
   sendMedia,
   fetchGroups,
