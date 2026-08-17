@@ -8,6 +8,7 @@ const {
   useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion,
+  fetchLatestWaWebVersion,
   makeCacheableSignalKeyStore,
   makeInMemoryStore,
   isJidGroup,
@@ -66,11 +67,32 @@ let lastDisconnectCode = null;
 // unrelated failure streak can never trigger an auth wipe.
 let loggedOutCount = 0;
 
-// Cache the protocol version - a reconnect loop shouldn't hit web.whatsapp.com
-// on every single attempt
+// WhatsApp refuses an outdated protocol version with 405 on the WebSocket
+// upgrade - before any QR, before any auth. So the version has to come from a
+// live lookup; the copy bundled inside the installed Baileys goes stale and is
+// a last resort, not a default. Successful lookups are cached so a reconnect
+// loop doesn't re-fetch on every attempt; a fallback is never cached.
 const VERSION_CACHE_MS = 6 * 60 * 60 * 1000;
 let cachedVersion = null;
 let cachedVersionAt = 0;
+let versionSource = null;
+let versionIsStale = false;
+// The version the last attempt actually used - kept for reporting, since a 405
+// clears the cache and the status endpoint still has to show what was tried
+let lastUsedVersion = null;
+
+// Escape hatch for hosts that can't reach web.whatsapp.com or GitHub:
+// BAILEYS_WA_VERSION=2.3000.1043857760
+const PINNED_VERSION = (() => {
+  const raw = (process.env.BAILEYS_WA_VERSION || '').trim();
+  if (!raw) return null;
+  const parts = raw.split('.').map(n => parseInt(n, 10));
+  if (parts.length !== 3 || parts.some(n => !Number.isFinite(n))) {
+    logger.warn('Ignoring malformed BAILEYS_WA_VERSION, expected e.g. 2.3000.1043857760', { value: raw });
+    return null;
+  }
+  return parts;
+})();
 
 /**
  * Schedule a reconnect attempt, replacing any pending one.
@@ -130,16 +152,59 @@ function tearDownSocket(sock = socket) {
 }
 
 /**
- * Latest protocol version, cached between attempts
+ * Resolve the WhatsApp Web protocol version to connect with.
+ * Order: env pin -> cached success -> web.whatsapp.com -> Baileys repo ->
+ * whatever the installed Baileys bundles (stale, expect 405).
  */
 async function getVersion() {
+  if (PINNED_VERSION) {
+    versionSource = 'env';
+    versionIsStale = false;
+    return PINNED_VERSION;
+  }
+
   if (cachedVersion && Date.now() - cachedVersionAt < VERSION_CACHE_MS) {
     return cachedVersion;
   }
-  const { version } = await fetchLatestBaileysVersion();
-  cachedVersion = version;
-  cachedVersionAt = Date.now();
-  return version;
+
+  // web.whatsapp.com is the source of truth
+  try {
+    const live = await fetchLatestWaWebVersion({});
+    if (live?.isLatest && Array.isArray(live.version)) {
+      cachedVersion = live.version;
+      cachedVersionAt = Date.now();
+      versionSource = 'whatsapp';
+      versionIsStale = false;
+      return cachedVersion;
+    }
+    logger.warn('Could not read the WA version from web.whatsapp.com', {
+      error: live?.error?.message || 'no client_revision in response'
+    });
+  } catch (err) {
+    logger.warn('Could not read the WA version from web.whatsapp.com', { error: err.message });
+  }
+
+  // Second choice: the version file published on the Baileys repo
+  const repo = await fetchLatestBaileysVersion();
+  if (repo.isLatest && Array.isArray(repo.version)) {
+    cachedVersion = repo.version;
+    cachedVersionAt = Date.now();
+    versionSource = 'baileys-repo';
+    versionIsStale = false;
+    return cachedVersion;
+  }
+
+  // Both lookups failed. What's left is the version compiled into the installed
+  // Baileys, which WhatsApp starts refusing (405) as soon as it ages out - so
+  // don't cache it, and make the reason loud.
+  versionSource = 'bundled-fallback';
+  versionIsStale = true;
+  logger.error('Both WA version lookups failed, using the version bundled with Baileys', {
+    version: repo.version?.join('.'),
+    error: repo.error?.message,
+    hint: 'WhatsApp answers 405 for outdated versions - allow egress to web.whatsapp.com / raw.githubusercontent.com, upgrade @whiskeysockets/baileys, or set BAILEYS_WA_VERSION'
+  });
+  return repo.version;
 }
 
 // Event callbacks
@@ -185,9 +250,16 @@ async function doConnect() {
     // Get auth state
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
 
-    // Get latest Baileys version (cached across attempts)
+    // Resolve the WA protocol version (a stale one is refused with 405)
     const version = await getVersion();
-    logger.info('Baileys connecting', { version: version.join('.'), attempt: retryCount });
+    lastUsedVersion = version;
+    logger.info('Baileys connecting', {
+      version: version.join('.'),
+      versionSource,
+      versionIsStale,
+      registered: !!state.creds?.registered,
+      attempt: retryCount
+    });
 
     // Try to create in-memory store (optional - for LID resolution)
     try {
@@ -273,7 +345,17 @@ async function doConnect() {
         const statusCode = lastDisconnect?.error?.output?.statusCode;
         const reason = DisconnectReason[statusCode] || 'unknown';
 
-        logger.warn('Baileys connection closed', { statusCode, reason });
+        logger.warn('Baileys connection closed', {
+          statusCode,
+          reason,
+          // The Boom payload carries WhatsApp's own wording ("Connection
+          // Failure", "Stream Errored", ...) which the status code alone hides
+          error: lastDisconnect?.error?.message,
+          payload: lastDisconnect?.error?.output?.payload,
+          data: lastDisconnect?.error?.data,
+          version: lastUsedVersion ? lastUsedVersion.join('.') : null,
+          versionSource
+        });
         connectionStatus = 'disconnected';
         lastDisconnectCode = statusCode || null;
         qrCodeData = null;
@@ -331,6 +413,14 @@ async function doConnect() {
         // back off in growing steps and escalate to "re-pair needed".
         if (REJECTED_CODES.has(statusCode)) {
           rejectedCount++;
+
+          // An outdated protocol version is the most common reason WhatsApp
+          // refuses the upgrade, so drop the cached version and re-resolve it
+          // on the next attempt instead of retrying with the same one.
+          const staleVersionSuspected = versionIsStale || versionSource === 'bundled-fallback';
+          cachedVersion = null;
+          cachedVersionAt = 0;
+
           const delay = Math.min(
             REJECT_BACKOFF_MS * Math.pow(2, rejectedCount - 1),
             REJECT_BACKOFF_MAX_MS
@@ -345,6 +435,7 @@ async function doConnect() {
             statusCode,
             consecutiveRejections: rejectedCount,
             nextAttemptInMs: delay,
+            staleVersionSuspected,
             requiresRepair
           });
           scheduleReconnect(delay);
@@ -360,6 +451,7 @@ async function doConnect() {
               rejected: true,
               consecutiveRejections: rejectedCount,
               nextAttemptInMs: delay,
+              staleVersionSuspected,
               requiresRepair,
               repairJustDetected
             });
@@ -1007,7 +1099,10 @@ function getStatus() {
     lastDisconnectCode,
     consecutiveRejections: rejectedCount,
     requiresRepair,
-    manualDisconnect
+    manualDisconnect,
+    waVersion: lastUsedVersion ? lastUsedVersion.join('.') : null,
+    waVersionSource: versionSource,
+    waVersionStale: versionIsStale
   };
 }
 

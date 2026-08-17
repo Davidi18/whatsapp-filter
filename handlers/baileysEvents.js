@@ -94,14 +94,18 @@ function initialize() {
       // WhatsApp is refusing the handshake itself (405/403). Retrying can't fix
       // an invalid device link - the user has to pair again.
       outageAlertSent = true;
+      const staleVersionNote = update.staleVersionSuspected
+        ? ' The WA protocol version could not be looked up, so the outdated one bundled with Baileys was used - WhatsApp answers 405 for old versions. Allow outbound access to web.whatsapp.com, upgrade @whiskeysockets/baileys, or set BAILEYS_WA_VERSION.'
+        : ' Most likely the device link is no longer valid - open the UI, log out and pair again. It can also be WhatsApp rate-limiting this server IP.';
       await alertService.send({
         level: alertService.ALERT_LEVELS.CRITICAL,
         event: 'baileys_requires_repair',
-        title: 'WhatsApp Refusing Connection - Re-pair Needed',
-        message: `WhatsApp rejected the connection ${update.consecutiveRejections} times in a row (code ${update.statusCode}). The device link is probably no longer valid - open the UI, log out, and scan the QR / use a pairing code again. Retries continue in the background at a slow interval.`,
+        title: 'WhatsApp Refusing Connection',
+        message: `WhatsApp rejected the connection ${update.consecutiveRejections} times in a row (code ${update.statusCode}).${staleVersionNote} Retries continue in the background at a slow interval.`,
         details: {
           statusCode: update.statusCode,
           consecutiveRejections: update.consecutiveRejections,
+          staleVersionSuspected: !!update.staleVersionSuspected,
           nextAttemptInMinutes: Math.round((update.nextAttemptInMs || 0) / 60000)
         }
       });
