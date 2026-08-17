@@ -464,6 +464,7 @@ Look for `missingWebhooks` in the response to identify gaps.
 | `MENTION_ONLY_OPENCLAW` | ❌ | Only forward mentions to OpenClaw | `false` |
 | `ENABLE_MESSAGE_UPDATES` | ❌ | Forward read/delivered status | `false` |
 | `BAILEYS_ENABLED` | ❌ | Use Baileys (direct WhatsApp) | `false` |
+| `BAILEYS_WA_VERSION` | ❌ | Pin the WhatsApp Web protocol version, e.g. `2.3000.1043857760` | looked up at runtime |
 | `BAILEYS_SLOW_RETRY_MS` | ❌ | Retry interval after fast retries are exhausted | `300000` (5 min) |
 | `BAILEYS_REJECT_BACKOFF_MS` | ❌ | First back-off when WhatsApp refuses the connection (405/403); doubles each time | `300000` (5 min) |
 | `BAILEYS_REJECT_BACKOFF_MAX_MS` | ❌ | Cap for that back-off | `3600000` (60 min) |
@@ -477,10 +478,31 @@ every `BAILEYS_SLOW_RETRY_MS`. A watchdog forces an attempt if nothing is
 scheduled, and only then - it never stacks a second socket on top of a pending
 attempt.
 
-Status code **405** (or 403) means WhatsApp refused the handshake itself, usually
-because the device link is no longer valid or because too many connection
-attempts came from this IP. Retrying fast cannot fix it and keeps the block
-alive, so those closes get an escalating back-off (5 → 10 → 20 → … → 60 min).
+#### Status code 405
+
+**405 almost always means the WhatsApp Web protocol version is too old.**
+WhatsApp answers 405 on the WebSocket upgrade - before any QR, before any auth -
+so every attempt fails identically no matter what the session looks like.
+
+The version is resolved on each connect, in this order:
+
+1. `BAILEYS_WA_VERSION`, if set
+2. `web.whatsapp.com` (the source of truth), cached 6h on success
+3. the version file published on the Baileys repo
+4. the version compiled into the installed `@whiskeysockets/baileys` - a last
+   resort that goes stale as the package ages, and is never cached
+
+Baileys swallows lookup failures silently, so `Baileys connecting` logs
+`versionSource` and `versionIsStale`, and a fallback logs an explicit error.
+If `versionSource` is `bundled-fallback`, the container cannot reach
+`web.whatsapp.com` or `raw.githubusercontent.com`: open that egress, upgrade the
+package, or pin `BAILEYS_WA_VERSION`. A 405 also drops the cached version so the
+next attempt re-resolves it instead of retrying the same rejected one.
+
+Other causes of 405, once the version is confirmed current: the device link is no
+longer valid (log out and pair again), or WhatsApp is rate-limiting this server
+IP. Retrying fast cannot fix either and keeps the block alive, so those closes
+get an escalating back-off (5 → 10 → 20 → … → 60 min).
 After `BAILEYS_REJECTS_BEFORE_REPAIR` refusals in a row, `requiresRepair` is
 exposed on `/api/baileys/status` and `/health/connection`, and a critical alert
 is sent: log out in the UI and pair the device again.

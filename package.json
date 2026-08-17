@@ -13,7 +13,7 @@
     "cors": "^2.8.5",
     "helmet": "^7.1.0",
     "express-rate-limit": "^7.1.5",
-    "@whiskeysockets/baileys": "^6.7.16",
+    "@whiskeysockets/baileys": "6.7.24",
     "qrcode": "^1.5.4",
     "pino": "^9.6.0"
   },
