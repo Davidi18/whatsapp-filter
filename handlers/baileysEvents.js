@@ -90,6 +90,21 @@ function initialize() {
           willReconnect: update.willReconnect
         }
       });
+    } else if (update.repairJustDetected) {
+      // WhatsApp is refusing the handshake itself (405/403). Retrying can't fix
+      // an invalid device link - the user has to pair again.
+      outageAlertSent = true;
+      await alertService.send({
+        level: alertService.ALERT_LEVELS.CRITICAL,
+        event: 'baileys_requires_repair',
+        title: 'WhatsApp Refusing Connection - Re-pair Needed',
+        message: `WhatsApp rejected the connection ${update.consecutiveRejections} times in a row (code ${update.statusCode}). The device link is probably no longer valid - open the UI, log out, and scan the QR / use a pairing code again. Retries continue in the background at a slow interval.`,
+        details: {
+          statusCode: update.statusCode,
+          consecutiveRejections: update.consecutiveRejections,
+          nextAttemptInMinutes: Math.round((update.nextAttemptInMs || 0) / 60000)
+        }
+      });
     } else if (update.enteredSlowRetry) {
       // Fast reconnect attempts exhausted - connection is down and only
       // retrying every few minutes now. The user should know about this.
@@ -98,10 +113,14 @@ function initialize() {
         level: alertService.ALERT_LEVELS.CRITICAL,
         event: 'baileys_reconnect_failing',
         title: 'WhatsApp Reconnection Failing',
-        message: `Lost the WhatsApp connection and fast reconnect attempts failed (reason: ${update.reason || 'unknown'}). Now retrying every few minutes - check the server and QR status.`,
+        message: `Lost the WhatsApp connection and fast reconnect attempts failed (reason: ${update.reason || 'unknown'}${update.statusCode ? `, code ${update.statusCode}` : ''}). Now retrying every few minutes - check the server and QR status.`,
         details: {
           reason: update.reason,
-          status: 'slow_retry'
+          statusCode: update.statusCode || null,
+          status: 'slow_retry',
+          nextAttemptInMinutes: update.nextAttemptInMs
+            ? Math.round(update.nextAttemptInMs / 60000)
+            : null
         }
       });
     } else if (update.status === 'connected') {
@@ -154,7 +173,9 @@ async function start() {
 }
 
 /**
- * Stop Baileys connection
+ * Stop the Baileys connection (shutdown path).
+ * Must NOT log out: a logout on SIGTERM unlinks the device on WhatsApp's side,
+ * so the creds left on disk are dead and the next boot gets refused (405).
  */
 async function stop() {
   try {

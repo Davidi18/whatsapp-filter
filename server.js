@@ -419,6 +419,8 @@ app.get('/health/connection', (req, res) => {
     reconnecting: baileysStatus
       ? !!(baileysStatus.reconnectScheduled || baileysStatus.slowRetryMode)
       : status === 'connecting',
+    // true = automatic recovery can't help, the device link must be re-paired
+    requiresRepair: baileysStatus ? !!baileysStatus.requiresRepair : false,
     phoneNumber: (baileysStatus && baileysStatus.phoneNumber) || state.phoneNumber,
     since: state.statusSince,
     instance: state.instance,
@@ -649,7 +651,7 @@ app.post('/api/baileys/connect', async (req, res) => {
 app.post('/api/baileys/disconnect', async (req, res) => {
   try {
     await baileysService.disconnect();
-    res.json({ success: true, message: 'Disconnected' });
+    res.json({ success: true, message: 'Disconnected (session kept - use /api/baileys/connect to resume without a new QR)' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -675,7 +677,7 @@ app.post('/api/baileys/pairing-code', async (req, res) => {
 // Logout and clear session
 app.post('/api/baileys/logout', async (req, res) => {
   try {
-    await baileysService.disconnect();
+    await baileysService.logout();
     await baileysService.clearAuthState();
     res.json({ success: true, message: 'Logged out and session cleared' });
   } catch (error) {
@@ -1509,7 +1511,8 @@ async function startServer() {
     let prolongedAlertSent = false;
 
     setInterval(() => {
-      const status = baileysService.getStatus().status;
+      const baileysStatus = baileysService.getStatus();
+      const status = baileysStatus.status;
 
       if (status === 'connected') {
         downSince = null;
@@ -1517,9 +1520,17 @@ async function startServer() {
         return;
       }
 
+      // Someone stopped the connection on purpose - don't fight them
+      if (baileysStatus.manualDisconnect) {
+        downSince = null;
+        return;
+      }
+
       if (downSince === null) downSince = Date.now();
 
-      // Reconnect if nothing is scheduled (waiting_qr/connecting need no push)
+      // Reconnect if nothing is scheduled (waiting_qr/connecting need no push).
+      // hasPendingReconnect() also covers in-flight attempts and back-off
+      // windows, so the watchdog never stacks a second socket on top.
       if ((status === 'disconnected' || status === 'error') && !baileysService.hasPendingReconnect()) {
         logger.warn('Watchdog: connection down with no reconnect scheduled, forcing reconnect');
         baileysEvents.start().catch(err => {
@@ -1536,10 +1547,15 @@ async function startServer() {
           title: `WhatsApp Down for ${downMinutes}+ Minutes`,
           message: status === 'waiting_qr'
             ? 'WhatsApp is waiting for a QR scan - manual action is required to reconnect.'
-            : 'The WhatsApp connection has been down for an extended period despite automatic reconnect attempts.',
+            : baileysStatus.requiresRepair
+              ? `WhatsApp keeps refusing this client (code ${baileysStatus.lastDisconnectCode}). The device link is most likely invalid - log out and pair again.`
+              : 'The WhatsApp connection has been down for an extended period despite automatic reconnect attempts.',
           details: {
             status,
-            downSince: new Date(downSince).toISOString()
+            downSince: new Date(downSince).toISOString(),
+            lastDisconnectCode: baileysStatus.lastDisconnectCode,
+            requiresRepair: baileysStatus.requiresRepair,
+            nextAttemptAt: baileysStatus.nextAttemptAt
           }
         }).catch(() => {});
       }

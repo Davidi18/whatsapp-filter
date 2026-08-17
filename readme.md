@@ -464,6 +464,30 @@ Look for `missingWebhooks` in the response to identify gaps.
 | `MENTION_ONLY_OPENCLAW` | ❌ | Only forward mentions to OpenClaw | `false` |
 | `ENABLE_MESSAGE_UPDATES` | ❌ | Forward read/delivered status | `false` |
 | `BAILEYS_ENABLED` | ❌ | Use Baileys (direct WhatsApp) | `false` |
+| `BAILEYS_SLOW_RETRY_MS` | ❌ | Retry interval after fast retries are exhausted | `300000` (5 min) |
+| `BAILEYS_REJECT_BACKOFF_MS` | ❌ | First back-off when WhatsApp refuses the connection (405/403); doubles each time | `300000` (5 min) |
+| `BAILEYS_REJECT_BACKOFF_MAX_MS` | ❌ | Cap for that back-off | `3600000` (60 min) |
+| `BAILEYS_REJECTS_BEFORE_REPAIR` | ❌ | Consecutive refusals before the "re-pair needed" alert | `3` |
+| `PROLONGED_DISCONNECT_MINUTES` | ❌ | Minutes offline before the critical alert | `10` |
+
+### Connection Recovery
+
+Baileys reconnects itself: fast backoff (1s→16s, 5 attempts), then a slow retry
+every `BAILEYS_SLOW_RETRY_MS`. A watchdog forces an attempt if nothing is
+scheduled, and only then - it never stacks a second socket on top of a pending
+attempt.
+
+Status code **405** (or 403) means WhatsApp refused the handshake itself, usually
+because the device link is no longer valid or because too many connection
+attempts came from this IP. Retrying fast cannot fix it and keeps the block
+alive, so those closes get an escalating back-off (5 → 10 → 20 → … → 60 min).
+After `BAILEYS_REJECTS_BEFORE_REPAIR` refusals in a row, `requiresRepair` is
+exposed on `/api/baileys/status` and `/health/connection`, and a critical alert
+is sent: log out in the UI and pair the device again.
+
+`POST /api/baileys/disconnect` only closes the socket and keeps the paired
+session (reconnect needs no QR). Only `POST /api/baileys/logout` unlinks the
+device. Shutting the container down (SIGTERM) never logs out.
 
 ### Phone Number Format
 
